@@ -48,5 +48,6 @@ typedef struct {
 
 
 void disp_gamma_init(disp_gamma_id_t id, unsigned int width, unsigned int height, void *cmdq);
+int disp_ccorr_set_color_matrix(void *cmdq, int32_t matrix[16], int32_t hint);
 
 #endif

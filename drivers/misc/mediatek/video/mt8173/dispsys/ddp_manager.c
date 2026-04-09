@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
- * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -328,7 +327,7 @@ disp_path_handle dpmgr_create_path(DDP_SCENARIO_ENUM scenario, cmdqRecHandle cmd
 	int module_num = ddp_get_module_num(scenario);
 	DDP_MANAGER_CONTEXT *content = _get_context();
 
-	path_handle = kzalloc(sizeof(ddp_path_handle_t), GFP_KERNEL);
+	path_handle = kzalloc(sizeof(uint8_t *) * sizeof(ddp_path_handle_t), GFP_KERNEL);
 	if (NULL != path_handle) {
 		path_handle->cmdqhandle = cmdq_handle;
 		path_handle->scenario = scenario;
@@ -635,10 +634,8 @@ int dpmgr_path_init(disp_path_handle dp_handle, int encmdq)
 	int *modules;
 	int module_num;
 	cmdqRecHandle cmdqHandle;
-	DDP_MANAGER_CONTEXT *content;
 
 	ASSERT(dp_handle != NULL);
-	content = _get_context();
 	handle = (ddp_path_handle) dp_handle;
 	modules = ddp_get_scenario_list(handle->scenario);
 	module_num = ddp_get_module_num(handle->scenario);
@@ -660,13 +657,6 @@ int dpmgr_path_init(disp_path_handle dp_handle, int encmdq)
 				DISP_LOG_V("scenario %s init module  %s\n",
 					   ddp_get_scenario_name(handle->scenario),
 					   ddp_get_module_name(module_name));
-
-				if (0 == content->module_usage_table[module_name]) {
-					DDPMSG("added module %s in usage table\n", ddp_get_module_name(module_name));
-					content->module_usage_table[module_name]++;
-					content->module_path_table[module_name] = handle;
-				}
-
 				ddp_modules_driver[module_name]->init(module_name, cmdqHandle);
 			}
 			if (ddp_modules_driver[module_name]->set_listener != 0) {
@@ -920,13 +910,13 @@ int dpmgr_path_build_cmdq(disp_path_handle dp_handle, void *trigger_loop_handle,
 	handle = (ddp_path_handle) dp_handle;
 	modules = ddp_get_scenario_list(handle->scenario);
 	module_num = ddp_get_module_num(handle->scenario);
-	/*DISP_LOG_D("path build cmdq on scenario %s\n", ddp_get_scenario_name(handle->scenario));*/
+	DISP_LOG_D("path build cmdq on scenario %s\n", ddp_get_scenario_name(handle->scenario));
 	for (i = 0; i < module_num; i++) {
 		module_name = modules[i];
 		if (ddp_modules_driver[module_name] != 0) {
 			if (ddp_modules_driver[module_name]->build_cmdq != 0) {
-				/*DISP_LOG_D("%s build cmdq, state=%d\n",
-					   ddp_get_module_name(module_name), state);*/
+				DISP_LOG_D("%s build cmdq, state=%d\n",
+					   ddp_get_module_name(module_name), state);
 				ret = ddp_modules_driver[module_name]->build_cmdq(module_name,
 					trigger_loop_handle, state);
 			}
@@ -1292,7 +1282,7 @@ int dpmgr_path_user_cmd(disp_path_handle dp_handle, int msg, unsigned long arg, 
 			primary_display_set_panel_param(arg);
 
 			break;
-		}
+		}	
 	default:
 		{
 			DISP_LOG_W("dpmgr_path_user_cmd io not supported\n");
@@ -1497,7 +1487,7 @@ int dpmgr_wait_event_timeout(disp_path_handle dp_handle, DISP_PATH_EVENT event, 
 	if (wq_handle->init) {
 		DISP_LOG_V("wait event %s on scenario %s\n", path_event_name(event),
 			   ddp_get_scenario_name(handle->scenario));
-		cur_time = sched_clock();
+		cur_time = ktime_to_ns(ktime_get());
 		ret =
 		    wait_event_interruptible_timeout(wq_handle->wq, cur_time < wq_handle->data,
 						     timeout);
@@ -1520,7 +1510,8 @@ int dpmgr_wait_event_timeout(disp_path_handle dp_handle, DISP_PATH_EVENT event, 
 	return ret;
 }
 
-int dpmgr_wait_event(disp_path_handle dp_handle, DISP_PATH_EVENT event)
+
+int _dpmgr_wait_event(disp_path_handle dp_handle, DISP_PATH_EVENT event, unsigned long long *event_ts)
 {
 	int ret = -1;
 	ddp_path_handle handle;
@@ -1533,7 +1524,7 @@ int dpmgr_wait_event(disp_path_handle dp_handle, DISP_PATH_EVENT event)
 	if (wq_handle->init) {
 		DISP_LOG_V("wait event %s on scenario %s\n", path_event_name(event),
 			   ddp_get_scenario_name(handle->scenario));
-		cur_time = sched_clock();
+		cur_time = ktime_to_ns(ktime_get());
 		ret = wait_event_interruptible(wq_handle->wq, cur_time < wq_handle->data);
 		if (ret < 0) {
 			DISP_LOG_E("wait %s interrupt by other ret %d on scenario %s\n",
@@ -1544,11 +1535,23 @@ int dpmgr_wait_event(disp_path_handle dp_handle, DISP_PATH_EVENT event)
 				   path_event_name(event), ret,
 				   ddp_get_scenario_name(handle->scenario));
 		}
+		if (event_ts)
+			*event_ts = wq_handle->data;
 		return ret;
 	}
 	DISP_LOG_E("wait event %s not initialized on scenario %s\n", path_event_name(event),
 		   ddp_get_scenario_name(handle->scenario));
 	return ret;
+}
+
+int dpmgr_wait_event(disp_path_handle dp_handle, DISP_PATH_EVENT event)
+{
+	return _dpmgr_wait_event(dp_handle, event, NULL);
+}
+
+int dpmgr_wait_event_ts(disp_path_handle dp_handle, DISP_PATH_EVENT event, unsigned long long *event_ts)
+{
+	return _dpmgr_wait_event(dp_handle, event, event_ts);
 }
 
 int dpmgr_signal_event(disp_path_handle dp_handle, DISP_PATH_EVENT event)
@@ -1560,7 +1563,7 @@ int dpmgr_signal_event(disp_path_handle dp_handle, DISP_PATH_EVENT event)
 	handle = (ddp_path_handle) dp_handle;
 	wq_handle = &handle->wq_list[event];
 	if (handle->wq_list[event].init) {
-		wq_handle->data = sched_clock();
+		wq_handle->data = ktime_to_ns(ktime_get());
 		DISP_LOG_V("wake up evnet %s on scenario %s\n", path_event_name(event),
 			   ddp_get_scenario_name(handle->scenario));
 		wake_up_interruptible(&(handle->wq_list[event].wq));
@@ -1589,7 +1592,7 @@ static void dpmgr_irq_handler(DISP_MODULE_ENUM module, unsigned int regvalue)
 				if (handle->wq_list[j].init
 				    && irq_bit == handle->irq_event_map[j].irq_bit) {
 					dprec_stub_event(j);
-					handle->wq_list[j].data = sched_clock();
+					handle->wq_list[j].data = ktime_to_ns(ktime_get());
 					DDPIRQ("irq signal event %s on cycle %llu on scenario %s\n",
 					       path_event_name(j), handle->wq_list[j].data,
 					       ddp_get_scenario_name(handle->scenario));

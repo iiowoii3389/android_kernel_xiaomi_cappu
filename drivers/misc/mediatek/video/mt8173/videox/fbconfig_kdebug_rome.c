@@ -450,6 +450,9 @@ static long fbconfig_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 				       __LINE__);
 				return -EFAULT;
 			}
+
+			if (layer_info.index < 0 || layer_info.index > 3)
+				return -EFAULT;
 			global_layer_id = layer_info.index;
 			ovl_get_info(0, ovl_all);
 			layer_info.height = ovl_all[layer_info.index].src_h;

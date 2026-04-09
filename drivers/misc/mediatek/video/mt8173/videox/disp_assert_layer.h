@@ -23,6 +23,7 @@ extern "C" {
 	extern struct mutex OverlaySettingMutex;
 	extern atomic_t OverlaySettingDirtyFlag;
 	extern atomic_t OverlaySettingApplied;
+	extern void __inner_flush_dcache_all(void);
 
 	typedef enum {
 		DAL_STATUS_OK = 0,

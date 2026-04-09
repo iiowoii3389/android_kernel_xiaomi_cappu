@@ -49,6 +49,7 @@ static unsigned int GPIO_LCD_1V8_EN;
  */
 #define FRAME_WIDTH             (1536)
 #define FRAME_HEIGHT            (2048)
+#define LCM_DENSITY				(320)
 
 #define GPIO_OUT_ONE            1
 #define GPIO_OUT_ZERO           0
@@ -225,6 +226,7 @@ static void lcm_get_params(LCM_PARAMS *params)
 	params->type = LCM_TYPE_DSI;
 	params->width = FRAME_WIDTH;
 	params->height = FRAME_HEIGHT;
+	params->density	= LCM_DENSITY;
 
 	params->lcm_if = LCM_INTERFACE_DSI_DUAL;
 	params->lcm_cmd_if = LCM_INTERFACE_DSI_DUAL;

@@ -240,8 +240,6 @@ irqreturn_t disp_irq_handler(int irq, void *dev_id)
 		    (irq == ddp_irq_map[DISP_MODULE_DSI0]) ? DISP_MODULE_DSI0 : DISP_MODULE_DSI1;
 		reg_val =
 		    (DISP_REG_GET(DISPSYS_DSI0_BASE + 0xC + index * DISP_INDEX_OFFSET) & 0xff);
-		if (primary_display_esd_cust_get() == 1)
-			reg_val = reg_val & 0xfffe;
 		DISP_CPU_REG_SET(DISPSYS_DSI0_BASE + 0xC + index * DISP_INDEX_OFFSET, ~reg_val);
 		/* MMProfileLogEx(ddp_mmp_get_events()->DSI_IRQ[index], MMProfileFlagPulse, reg_val, 0); */
 	} else if (irq == ddp_irq_map[DISP_MODULE_DPI0] || irq == ddp_irq_map[DISP_MODULE_DPI1]) {

@@ -1646,12 +1646,12 @@ int _get_ext_disp_info(void *info)
 		dispif_info->displayType = DISP_IF_HDMI;
 	}
 
-#ifdef HDMI_SUB_PATH
 	dispif_info->isHwVsyncAvailable = 1;
-#else
-	dispif_info->isHwVsyncAvailable = 0;
-#endif
-	dispif_info->vsyncFPS = 60;
+
+	if (hdmi_reschange == HDMI_VIDEO_1920x1080p_30Hz)
+		dispif_info->vsyncFPS = 3000;
+	else
+		dispif_info->vsyncFPS = 6000;
 
 	if (dispif_info->displayWidth * dispif_info->displayHeight <= 240 * 432)
 		dispif_info->physicalHeight = dispif_info->physicalWidth = 0;
@@ -1669,6 +1669,7 @@ int _get_ext_disp_info(void *info)
 		    dispif_info->displayWidth, dispif_info->displayHeight,
 		    dispif_info->maxLayerNum);
 #endif
+	dispif_info->isHDCPSupported = hdmi_params->NeedSwHDCP ? UINT_MAX : 0;
 	/* dispif_info->isHDCPSupported = (unsigned int)hdmi_params->HDCPSupported; */
 	/* /HDMI_LOG("_get_ext_disp_info lays %d, type %d, H %d, hdcp %d\n", dispif_info->maxLayerNum ,
 	   dispif_info->displayType, dispif_info->displayHeight, dispif_info->isHDCPSupported); */
@@ -2406,11 +2407,13 @@ static long hdmi_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				MMProfileLogEx(ddp_mmp_get_events()->Extd_State, MMProfileFlagStart,
 					       ResChange, arg);
 
-			hdmi_dpi_power_switch(false);
+			/*hdmi_dpi_power_switch(false);*/
 			if (down_interruptible(&hdmi_update_mutex)) {
 				HDMI_ERR("[HDMI] can't get semaphore in\n");
 				return -EFAULT;
 			}
+
+			hdmi_dpi_power_switch(false);
 			/* hdmi_video_buffer_info temp; */
 			dpi_setting_res((u8) arg);
 

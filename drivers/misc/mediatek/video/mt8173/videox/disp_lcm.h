@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
- * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -44,7 +43,6 @@ int disp_lcm_esd_check(disp_lcm_handle *plcm);
 int disp_lcm_esd_recover(disp_lcm_handle *plcm);
 int disp_lcm_suspend(disp_lcm_handle *plcm);
 int disp_lcm_resume(disp_lcm_handle *plcm);
-int disp_lcm_resume_power(disp_lcm_handle *plcm);
 int disp_lcm_set_backlight(disp_lcm_handle *plcm, int level);
 int disp_lcm_read_fb(disp_lcm_handle *plcm);
 int disp_lcm_ioctl(disp_lcm_handle *plcm, LCM_IOCTL ioctl, unsigned int arg);

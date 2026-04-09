@@ -22,7 +22,7 @@
 #include "ddp_ovl.h"
 #include "primary_display.h"
 #ifdef CONFIG_MTK_HDMI_SUPPORT
-#include "../../../ext_disp/mt8173/extd_ddp.h"
+#include "extd_ddp.h"
 #endif
 #include "mtk_ovl.h"
 
@@ -825,11 +825,11 @@ static int ovl_config_l(DISP_MODULE_ENUM module, disp_ddp_path_config *pConfig, 
 
 	/* warm reset ovl every time we use it */
 	if (handle) {
-		unsigned int offset;
-
-		offset = ovl_index(module) * DISP_OVL_INDEX_OFFSET;
 		if (ovl_check_should_reset(module)) {
+			unsigned int offset;
+
 			DDPDBG("warm reset ovl%d every time we use it\n", ovl_index(module));
+			offset = ovl_index(module) * DISP_OVL_INDEX_OFFSET;
 			DISP_REG_SET(handle, DISP_REG_OVL_RST + offset, 0x1);
 			DISP_REG_SET(handle, DISP_REG_OVL_RST + offset, 0x0);
 			cmdqRecPoll(handle, disp_addr_convert(DISP_REG_OVL_STA + offset), 0, 0x1);

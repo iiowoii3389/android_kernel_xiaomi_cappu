@@ -272,7 +272,7 @@ int ovl2mem_init(unsigned int session)
 	DISPFUNC();
 
 	dpmgr_init();
-	mutex_init(&(pgc->lock));
+	/*mutex_init(&(pgc->lock));*/
 
 	_ovl2mem_path_lock(__func__);
 
@@ -400,6 +400,10 @@ int ovl2mem_output_config(ovl2mem_out_config *out)
 	_ovl2mem_path_lock(__func__);
 
 	/* all dirty should be cleared in dpmgr_path_get_last_config() */
+	if (pgc->dpmgr_handle == NULL) {
+		DISPMSG("ovl2mem_output_config dpmgr_handle NULL\n");
+		return 0;
+	}
 	data_config = dpmgr_path_get_last_config(pgc->dpmgr_handle);
 	data_config->dst_dirty = 1;
 	data_config->dst_h = out->h;
@@ -555,3 +559,11 @@ Exit:
 	DISPMSG("ovl2mem_deinit done\n");
 	return ret;
 }
+
+static int __init ovl2mem_module_init(void)
+{
+	mutex_init(&(pgc->lock));
+	return 0;
+}
+
+module_init(ovl2mem_module_init);

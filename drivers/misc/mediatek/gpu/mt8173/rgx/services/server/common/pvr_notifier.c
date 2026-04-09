@@ -406,17 +406,18 @@ PVRSRVDebugRequest(PVRSRV_DEVICE_NODE *psDevNode,
 	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
 	DEBUG_REQUEST_TABLE *psDebugTable =
 		(DEBUG_REQUEST_TABLE *) psDevNode->hDebugTable;
-	static const IMG_CHAR * apszVerbosityTable[] = { "Low", "Medium", "High" };
+	static const IMG_CHAR *apszVerbosityTable[] = { "Low", "Medium", "High" };
 	const IMG_CHAR *szVerbosityLevel;
 	IMG_UINT32 i;
 	IMG_UINT32 j;
 
 	static_assert(IMG_ARR_NUM_ELEMS(apszVerbosityTable) == DEBUG_REQUEST_VERBOSITY_MAX+1,
-		"Incorrect number of verbosity levels");
+	              "Incorrect number of verbosity levels");
 
 	PVR_ASSERT(psDebugTable);
 
-	if (!pfnDumpDebugPrintf) {
+	if (!pfnDumpDebugPrintf)
+	{
 		/*
 		 * Only dump the call stack to the kernel log if the debug text is going
 		 * there.
@@ -426,9 +427,12 @@ PVRSRVDebugRequest(PVRSRV_DEVICE_NODE *psDevNode,
 
 	OSWRLockAcquireRead(psDebugTable->hLock);
 
-	if (ui32VerbLevel < IMG_ARR_NUM_ELEMS(apszVerbosityTable)) {
+	if (ui32VerbLevel < IMG_ARR_NUM_ELEMS(apszVerbosityTable))
+	{
 		szVerbosityLevel = apszVerbosityTable[ui32VerbLevel];
-	} else {
+	}
+	else
+	{
 		szVerbosityLevel = "unknown";
 		PVR_ASSERT(!"Invalid verbosity level received");
 	}
@@ -439,31 +443,37 @@ PVRSRVDebugRequest(PVRSRV_DEVICE_NODE *psDevNode,
 	PVR_DUMPDEBUG_LOG("DDK info: %s (%s) %s",
 					   PVRVERSION_STRING, PVR_BUILD_TYPE, PVR_BUILD_DIR);
 	PVR_DUMPDEBUG_LOG("Time now: %015llu", OSClockus64());
-
+	
 	if (!pfnDumpDebugPrintf)
+	{
 		MTKPP_LOGTIME(MTKPP_ID_FW, "Dump Debug Data");
+	}
 
-	switch (psPVRSRVData->eServicesState) {
-	case PVRSRV_SERVICES_STATE_OK:
-		PVR_DUMPDEBUG_LOG("Services State: OK");
-		break;
-	case PVRSRV_SERVICES_STATE_BAD:
-		PVR_DUMPDEBUG_LOG("Services State: BAD");
-		break;
-	default:
-		PVR_DUMPDEBUG_LOG("Services State: UNKNOWN (%d)",
-			psPVRSRVData->eServicesState);
-		break;
+	switch (psPVRSRVData->eServicesState)
+	{
+		case PVRSRV_SERVICES_STATE_OK:
+			PVR_DUMPDEBUG_LOG("Services State: OK");
+			break;
+		case PVRSRV_SERVICES_STATE_BAD:
+			PVR_DUMPDEBUG_LOG("Services State: BAD");
+			break;
+		default:
+			PVR_DUMPDEBUG_LOG("Services State: UNKNOWN (%d)",
+							   psPVRSRVData->eServicesState);
+			break;
 	}
 
 	/* For each verbosity level */
-	for (j = 0; j <= ui32VerbLevel; j++) {
+	for (j = 0; j <= ui32VerbLevel; j++)
+	{
 		/* For each requester */
-		for (i = 0; i < psDebugTable->ui32RequestCount; i++) {
+		for (i = 0; i < psDebugTable->ui32RequestCount; i++)
+		{
 			DLLIST_NODE *psNode;
 			DLLIST_NODE *psNext;
 
-			dllist_foreach_node(&psDebugTable->asEntry[i].sListHead, psNode, psNext) {
+			dllist_foreach_node(&psDebugTable->asEntry[i].sListHead, psNode, psNext)
+			{
 				DEBUG_REQUEST_NOTIFY *psNotify =
 					IMG_CONTAINER_OF(psNode, DEBUG_REQUEST_NOTIFY, sListNode);
 				psNotify->pfnDbgRequestNotify(psNotify->hDbgRequestHandle, j,

@@ -80,4 +80,8 @@ else
 #ccflags-y += -DMTK_DISP_IDLE_LP
 endif
 
+ifeq ($(strip $(CONFIG_MTK_LCM_PHYSICAL_ROTATION)),"180")
+    ccflags-y += -DLCM_PHYSICAL_ROTATION_180
+endif
+
 # EOF

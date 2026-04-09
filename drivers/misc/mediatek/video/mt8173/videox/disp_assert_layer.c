@@ -378,7 +378,7 @@ DAL_STATUS DAL_Printf(const char *fmt, ...)
 	va_end(args);
 	DAL_CHECK_MFC_RET(MFC_Print(mfc_handle, dal_print_buffer));
 
-	flush_cache_all();
+	__inner_flush_dcache_all();
 /*
     if (LCD_STATE_POWER_OFF == LCD_GetState()) {
 	ret = DAL_STATUS_LCD_IN_SUSPEND;

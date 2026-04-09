@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
- * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -94,7 +93,7 @@ bool fbconfig_start_LCM_config;
 #else
 #define DP_COLOR_BITS_PER_PIXEL(color)    ((0x0003FF00 & color) >>  8)
 #endif
-static int global_layer_id = -1;
+
 
 struct dentry *ConfigPara_dbgfs = NULL;
 CONFIG_RECORD_LIST head_list;
@@ -120,7 +119,6 @@ static PM_TOOL_T pm_params = {
 	.pLcm_drv = NULL,
 };
 struct mutex fb_config_lock;
-
 static void *pm_get_handle(void)
 {
 	return (void *)&pm_params;
@@ -167,7 +165,7 @@ void Panel_Master_DDIC_config(void)
 
 	struct list_head *p;
 	CONFIG_RECORD_LIST *node;
-
+	mutex_lock(&fb_config_lock);
 	list_for_each_prev(p, &head_list.list) {
 		node = list_entry(p, CONFIG_RECORD_LIST, list);
 		switch (node->record.type) {
@@ -185,32 +183,14 @@ void Panel_Master_DDIC_config(void)
 		}
 
 	}
-
+	mutex_unlock(&fb_config_lock);
 }
-
-/*static void print_from_head_to_tail(void)
-{
-	int i;
-	struct list_head *p;
-	CONFIG_RECORD_LIST *print;
-	pr_debug("DDIC=====>:print_from_head_to_tail  START\n");
-
-	list_for_each_prev(p, &head_list.list) {
-		print = list_entry(p, CONFIG_RECORD_LIST, list);
-		pr_debug("type:%d num %d value:\r\n", print->record.type, print->record.ins_num);
-		for (i = 0; i < print->record.ins_num; i++)
-			pr_debug("0x%x\t", print->record.ins_array[i]);
-		pr_debug("\r\n");
-	}
-	pr_debug("DDIC=====>:print_from_head_to_tail  END\n");
-
-}*/
 
 static void free_list_memory(void)
 {
 	struct list_head *p, *n;
 	CONFIG_RECORD_LIST *print;
-
+	mutex_lock(&fb_config_lock);
 	list_for_each_safe(p, n, &head_list.list) {
 		print = list_entry(p, CONFIG_RECORD_LIST, list);
 		list_del(&print->list);
@@ -221,6 +201,7 @@ static void free_list_memory(void)
 		pr_debug("*****list is empty!!\n");
 	else
 		pr_debug("*****list is NOT empty!!\n");
+	mutex_unlock(&fb_config_lock);
 
 }
 
@@ -228,17 +209,19 @@ static int fbconfig_open(struct inode *inode, struct file *file)
 {
 	PM_TOOL_T *pm_params;
 	file->private_data = inode->i_private;
-	mutex_init(&fb_config_lock);
 	pm_params = (PM_TOOL_T *) pm_get_handle();
 	PanelMaster_set_PM_enable(1);
 	pm_params->pLcm_drv = DISP_GetLcmDrv();
 	pm_params->pLcm_params = DISP_GetLcmPara();
 
-	if (pm_params->pLcm_params->lcm_if == LCM_INTERFACE_DSI_DUAL)
-		pm_params->dsi_id = PM_DSI_DUAL;
-	else if (pm_params->pLcm_params->lcm_if == LCM_INTERFACE_DSI1)
-		pm_params->dsi_id = PM_DSI1;
-	return 0;
+	if (pm_params->pLcm_params) {
+		if (pm_params->pLcm_params->lcm_if == LCM_INTERFACE_DSI_DUAL)
+			pm_params->dsi_id = PM_DSI_DUAL;
+		else if (pm_params->pLcm_params->lcm_if == LCM_INTERFACE_DSI1)
+			pm_params->dsi_id = PM_DSI1;
+		return 0;
+	} else
+		return -EINVAL;
 }
 
 
@@ -357,11 +340,9 @@ static long fbconfig_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	case DRIVER_IC_CONFIG_DONE:
 	{
 		/* while all DRIVER_IC_CONFIG is added, use this to set complete */
-		mutex_lock(&fb_config_lock);
 		Panel_Master_dsi_config_entry("PM_DDIC_CONFIG", NULL);
 		/* free the memory ..... */
 		free_list_memory();
-		mutex_unlock(&fb_config_lock);
 	}
 	break;
 	case MIPI_SET_CC:
@@ -507,131 +488,45 @@ static long fbconfig_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	break;
 	case FB_LAYER_GET_EN:
 	{
-		PM_LAYER_EN layers;
-		OVL_BASIC_STRUCT ovl_all[TOTAL_OVL_LAYER_NUM];
-		int i = 0;
-
-		memset(ovl_all, 0, sizeof(ovl_all));
-#ifdef PRIMARY_THREE_OVL_CASCADE
-		ovl_get_info(DISP_MODULE_OVL0_2L, ovl_all);
-		ovl_get_info(DISP_MODULE_OVL0, &ovl_all[2]);
-		ovl_get_info(DISP_MODULE_OVL1_2L, &ovl_all[6]);
-		for (i = 0; i < TOTAL_OVL_LAYER_NUM; i++)
-			layers.layer_en[i] = (ovl_all[i].layer_en ? 1 : 0);
-#else
-		ovl_get_info(DISP_MODULE_OVL0, ovl_all);
-		layers.layer_en[i + 0] = (ovl_all[0].layer_en ? 1 : 0);
-		layers.layer_en[i + 1] = (ovl_all[1].layer_en ? 1 : 0);
-		layers.layer_en[i + 2] = (ovl_all[2].layer_en ? 1 : 0);
-		layers.layer_en[i + 3] = (ovl_all[3].layer_en ? 1 : 0);
-#ifdef OVL_CASCADE_SUPPORT
-		layers.layer_en[i + 4] = (ovl_all[4].layer_en ? 1 : 0);
-		layers.layer_en[i + 5] = (ovl_all[5].layer_en ? 1 : 0);
-		layers.layer_en[i + 6] = (ovl_all[6].layer_en ? 1 : 0);
-		layers.layer_en[i + 7] = (ovl_all[7].layer_en ? 1 : 0);
-#endif
-#endif
-		pr_debug("[FB_LAYER_GET_EN] L0:%d L1:%d L2:%d L3:%d\n",
-			ovl_all[0].layer_en, ovl_all[1].layer_en, ovl_all[2].layer_en, ovl_all[3].layer_en);
-		return copy_to_user(argp, &layers, sizeof(layers)) ? -EFAULT : 0;
+		pr_debug("[FB_LAYER_GET_EN] not support any more\n");
+		return  0;
 	}
 	break;
 	case FB_LAYER_GET_INFO:
 	{
-		PM_LAYER_INFO layer_info;
-		OVL_BASIC_STRUCT ovl_all[TOTAL_OVL_LAYER_NUM];
-
-		memset(ovl_all, 0, sizeof(ovl_all));
-		if (copy_from_user(&layer_info, argp, sizeof(layer_info))) {
-			pr_debug("[FB_LAYER_GET_INFO]: copy_from_user failed! line:%d\n", __LINE__);
-			return -EFAULT;
-		}
-		global_layer_id = layer_info.index;
-#ifdef PRIMARY_THREE_OVL_CASCADE
-		ovl_get_info(DISP_MODULE_OVL0_2L, ovl_all);
-		ovl_get_info(DISP_MODULE_OVL0, &ovl_all[2]);
-		ovl_get_info(DISP_MODULE_OVL1_2L, &ovl_all[6]);
-#else
-		ovl_get_info(DISP_MODULE_OVL0, ovl_all);
-#endif
-		layer_info.height = ovl_all[layer_info.index].src_h;
-		layer_info.width = ovl_all[layer_info.index].src_w;
-		layer_info.fmt = DP_COLOR_BITS_PER_PIXEL(ovl_all[layer_info.index].fmt);
-		layer_info.layer_size = ovl_all[layer_info.index].src_pitch * ovl_all[layer_info.index].src_h;
-		pr_debug("===>: layer_size:0x%x height:%d\n", layer_info.layer_size, layer_info.height);
-		pr_debug("===>: width:%d src_pitch:%d\n", layer_info.width, ovl_all[layer_info.index].src_pitch);
-		pr_debug("===>: layer_id:%d fmt:%d\n", global_layer_id, layer_info.fmt);
-		pr_debug("===>: layer_en:%d\n", (ovl_all[layer_info.index].layer_en));
-		if ((layer_info.height == 0) || (layer_info.width == 0) || (ovl_all[layer_info.index].layer_en == 0)) {
-			pr_debug("===> Error, height/width is 0 or layer_en == 0!!\n");
-			return -2;
-		} else
-			return copy_to_user(argp, &layer_info, sizeof(layer_info)) ? -EFAULT : 0;
+		pr_debug("[FB_LAYER_GET_INFO] not support any more\n");
+		return  0;
 	}
 	break;
 	case FB_LAYER_DUMP:
 	{
-		int layer_size;
-		int ret = 0;
-		unsigned long kva = 0;
-		unsigned int mva;
-		unsigned int mapped_size = 0;
-		unsigned int real_mva = 0;
-		unsigned int real_size = 0;
-		OVL_BASIC_STRUCT ovl_all[TOTAL_OVL_LAYER_NUM];
-
-		memset(ovl_all, 0, sizeof(ovl_all));
-#ifdef PRIMARY_THREE_OVL_CASCADE
-		ovl_get_info(DISP_MODULE_OVL0_2L, ovl_all);
-		ovl_get_info(DISP_MODULE_OVL0, &ovl_all[2]);
-		ovl_get_info(DISP_MODULE_OVL1_2L, &ovl_all[6]);
-#else
-		ovl_get_info(DISP_MODULE_OVL0, ovl_all);
-#endif
-		layer_size = ovl_all[global_layer_id].src_pitch * ovl_all[global_layer_id].src_h;
-		mva = ovl_all[global_layer_id].addr;
-		pr_debug("layer_size=%d, src_pitch=%d, h=%d, mva=0x%x,\n",
-			 layer_size, ovl_all[global_layer_id].src_pitch, ovl_all[global_layer_id].src_h, mva);
-
-		if ((layer_size != 0) && (ovl_all[global_layer_id].layer_en != 0)) {
-			ret = m4u_query_mva_info(mva, layer_size, &real_mva, &real_size);
-			if (ret < 0) {
-				pr_debug("m4u_query_mva_info error: ret=%d mva=0x%x layer_size=%d\n",
-					ret, mva, layer_size);
-				return ret;
-			}
-			ret = m4u_mva_map_kernel(real_mva, real_size, &kva, &mapped_size);
-			if (ret < 0) {
-				pr_debug("m4u_mva_map_kernel error: ret=%d real_mva=0x%x real_size=%d\n",
-					ret, real_mva, real_size);
-				return ret;
-			}
-			if (layer_size > mapped_size) {
-				pr_debug("==>layer size(0x%x)>mapped size(0x%x)!!!\n", layer_size, mapped_size);
-				return -EFAULT;
-			}
-			pr_debug("==> addr from user space is 0x%p\n", argp);
-			pr_debug("==> kva=0x%lx real_mva=%x mva=%x mmaped_size=%d layer_size=%d\n",
-				kva, real_mva, mva, mapped_size, layer_size);
-			ret = copy_to_user(argp,
-				(void *)kva + (mva - real_mva), layer_size - (mva - real_mva)) ? -EFAULT : 0;
-			m4u_mva_unmap_kernel(real_mva, real_size, kva);
-			return ret;
-		} else
-			return -2;
+		pr_debug("[FB_LAYER_DUMP] not support any more\n");
+		return  0;
 	}
 	break;
 	case LCM_GET_ESD:
 	{
 		ESD_PARA esd_para;
 		uint8_t *buffer = NULL;
+		int buffer_size;
 
 		copy_ret_val = copy_from_user(&esd_para, argp, sizeof(esd_para));
 		if (copy_ret_val != 0) {
 			pr_debug("fbconfig=>LCM_GET_ESD copy_from_user failed @line %d\n", __LINE__);
 			return -EFAULT;
 		}
-		buffer = kzalloc(esd_para.para_num + 6, GFP_KERNEL);
+		if (esd_para.para_num <= 0 || esd_para.para_num > 100) {
+			pr_debug("fbconfig=>LCM_GET_ESD para_num:%d < 0\n", esd_para.para_num);
+			return -EINVAL;
+		}
+
+		buffer_size = esd_para.para_num + 6;
+		if (buffer_size < 0) {
+			pr_debug("buffer size overflow: buffer_size:%d, para_num:%d\n",
+				buffer_size, esd_para.para_num);
+			return -EINVAL;
+		}
+		buffer = kzalloc(buffer_size, GFP_KERNEL);
 		if (buffer == NULL)
 			return -ENOMEM;
 
@@ -1470,10 +1365,13 @@ static const struct file_operations fbconfig_fops = {
 
 void PanelMaster_Init(void)
 {
+#if defined(CONFIG_MT_ENG_BUILD)
 	ConfigPara_dbgfs = debugfs_create_file("fbconfig",
 					       S_IFREG | S_IRUGO, NULL, (void *)0, &fbconfig_fops);
+#endif
 
 	INIT_LIST_HEAD(&head_list.list);
+	mutex_init(&fb_config_lock);
 }
 
 void PanelMaster_Deinit(void)

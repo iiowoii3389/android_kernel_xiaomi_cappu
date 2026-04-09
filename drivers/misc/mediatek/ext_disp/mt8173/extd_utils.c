@@ -35,11 +35,9 @@ int extd_mutex_init(struct mutex *m)
 int extd_sw_mutex_lock(struct mutex *m)
 {
 	/* /mutex_lock(m); */
-	if (down_interruptible(&extd_mutex)) {
-		DISPDBG("mutex: can't get semaphore in %s()\n", __func__);
-		return 0;
-	}
-	DISPDBG("mutex: lock\n");
+	down(&extd_mutex);
+
+	/*DISPDBG("mutex: lock\n");*/
 	return 0;
 }
 

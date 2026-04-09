@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
- * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -187,6 +186,9 @@ extern unsigned int is_hwc_enabled;
 int primary_display_set_frame_buffer_address(unsigned long va, unsigned long mva);
 unsigned long primary_display_get_frame_buffer_mva_address(void);
 unsigned long primary_display_get_frame_buffer_va_address(void);
+int is_dim_layer(unsigned int long mva);
+unsigned long get_dim_layer_mva_addr(void);
+
 typedef int (*PRIMARY_DISPLAY_CALLBACK) (unsigned int user_data);
 
 int primary_display_init(struct platform_device *dev, char *lcm_name, unsigned int lcm_fps);
@@ -225,6 +227,7 @@ uint32_t DISP_GetScreenWidth(void);
 uint32_t DISP_GetScreenHeight(void);
 uint32_t DISP_GetActiveHeight(void);
 uint32_t DISP_GetActiveWidth(void);
+uint32_t DISP_GetDensity(void);
 int disp_hal_allocate_framebuffer(phys_addr_t pa_start, phys_addr_t pa_end, unsigned long *va,
 				  unsigned long *mva);
 int primary_display_is_video_mode(void);

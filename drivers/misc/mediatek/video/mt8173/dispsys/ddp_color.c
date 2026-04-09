@@ -1074,7 +1074,7 @@ void DpEngine_COLORonConfig(DISP_MODULE_ENUM module, unsigned int srcWidth, unsi
 		pq_param_p = &g_Color_Param[COLOR_ID_1];
 	}
 
-	if ((pq_param_p->u4SatGain >= COLOR_TUNING_INDEX && pq_param_p->u4SatGain != 0xffff) ||
+	if (pq_param_p->u4SatGain >= COLOR_TUNING_INDEX ||
 	    pq_param_p->u4HueAdj[PURP_TONE] >= COLOR_TUNING_INDEX ||
 	    pq_param_p->u4HueAdj[SKIN_TONE] >= COLOR_TUNING_INDEX ||
 	    pq_param_p->u4HueAdj[GRASS_TONE] >= COLOR_TUNING_INDEX ||
@@ -1101,11 +1101,6 @@ void DpEngine_COLORonConfig(DISP_MODULE_ENUM module, unsigned int srcWidth, unsi
 	DISP_REG_SET(cmdq, DISP_COLOR_G_PIC_ADJ_MAIN_1 + offset,
 		     (g_Color_Index.BRIGHTNESS[pq_param_p->u4Brightness] << 16) | g_Color_Index.
 		     CONTRAST[pq_param_p->u4Contrast]);
-
-	if (pq_param_p->u4SatGain == 0xffff)
-		DISP_REG_SET(cmdq, DISP_COLOR_G_PIC_ADJ_MAIN_2 + offset,
-					 (0x200 << 16) | 0);
-	else
 	DISP_REG_SET(cmdq, DISP_COLOR_G_PIC_ADJ_MAIN_2 + offset,
 		     (0x200 << 16) | g_Color_Index.GLOBAL_SAT[pq_param_p->u4SatGain]);
 
@@ -1312,10 +1307,6 @@ static void color_write_hw_reg(DISP_MODULE_ENUM module,
 
 	DISP_REG_SET(cmdq, DISP_COLOR_G_PIC_ADJ_MAIN_1 + offset,
 		(color_reg->BRIGHTNESS << 16) | color_reg->CONTRAST);
-	if (color_reg->GLOBAL_SAT == 0xffff)
-		DISP_REG_SET(cmdq, DISP_COLOR_G_PIC_ADJ_MAIN_2 + offset,
-				(0x200 << 16) | 0);
-	else
 	DISP_REG_SET(cmdq, DISP_COLOR_G_PIC_ADJ_MAIN_2 + offset,
 		(0x200 << 16) | color_reg->GLOBAL_SAT);
 
@@ -1515,8 +1506,13 @@ static void ddp_color_set_window(DISP_PQ_WIN_PARAM *win_param, void *__cmdq)
 	/* save to global, can be applied on following PQ param updating. */
 	if (win_param->split_en) {
 		g_split_en = 1;
+#if defined(LCM_PHYSICAL_ROTATION_180)
+		g_split_window_x = ((g_color0_dst_w - win_param->start_x) << 16) | (g_color0_dst_w - win_param->end_x);
+		g_split_window_y = ((g_color0_dst_h - win_param->start_y) << 16) | (g_color0_dst_h - win_param->end_y);
+#else
 		g_split_window_x = (win_param->end_x << 16) | win_param->start_x;
 		g_split_window_y = (win_param->end_y << 16) | win_param->start_y;
+#endif
 
 	} else {
 		g_split_en = 0;
@@ -1930,6 +1926,8 @@ static int _color_io(DISP_MODULE_ENUM module, int msg, unsigned long arg, void *
 
 		pa = (unsigned int)wParams.reg;
 		va = ddp_color_convert_pa2va(pa);
+		if (va == 0)
+			return -EFAULT;
 		ret = color_is_reg_addr_valid(va);
 		if (ret == 0) {
 			COLOR_ERR("reg write, addr invalid, pa:0x%x(va:0x%lx)\n", pa, va);
@@ -1940,7 +1938,7 @@ static int _color_io(DISP_MODULE_ENUM module, int msg, unsigned long arg, void *
 		if (ret == 2) {
 			if (cmdq == NULL)
 				mt_reg_sync_writel((unsigned int)(INREG32(va) & ~(wParams.mask)) | (wParams.val),
-						(volatile unsigned long*)(va));
+						(unsigned long *)(va));
 			else
 				cmdqRecWrite(cmdq, pa, wParams.val, wParams.mask);
 		} else {

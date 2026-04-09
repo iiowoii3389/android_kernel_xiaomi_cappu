@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
- * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -38,6 +37,4 @@ int disp_pwm_get_max_backlight(disp_pwm_id_t id);
 int disp_bls_set_max_backlight(unsigned int level_1024);
 int disp_bls_set_backlight(int level_1024);
 
-/* For TI LP8556 to control backlight level*/
-extern int lp855x_set_backlight_level(unsigned int level);
 #endif

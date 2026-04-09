@@ -2021,13 +2021,24 @@ int ext_disp_wait_for_vsync(void *config)
 	disp_session_vsync_config *c = (disp_session_vsync_config *) config;
 	int ret = 0;
 
+	_ext_disp_path_lock();
+
+	if (is_context_inited == 0) {
+		_ext_disp_path_unlock();
+		msleep(20);
+		return -1;
+	}
+
 	if (pgc->state == EXTD_DEINIT) {
 		DISPDBG("ext_disp path destroy, should not wait vsync\n");
+		_ext_disp_path_unlock();
+		msleep(20);
 		return -1;
 	}
 
 	if (pgc->dpmgr_handle == NULL) {
 		DISP_PRINTF(DDP_VYSNC_LOG, "vsync for ext display path not ready yet(1)\n");
+		_ext_disp_path_unlock();
 		return -1;
 	}
 
@@ -2035,6 +2046,7 @@ int ext_disp_wait_for_vsync(void *config)
 	if (pgc->dpmgr_handle == NULL) {
 		DISP_PRINTF(DDP_VYSNC_LOG, "vsync for ext display path not ready yet(1)\n");
 		mutex_unlock(&vsync_mtx);
+		_ext_disp_path_unlock();
 		return -1;
 	}
 	ret = dpmgr_wait_event_timeout(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC, HZ / 10);
@@ -2042,12 +2054,15 @@ int ext_disp_wait_for_vsync(void *config)
 	if (ret == -2) {
 		DISPCHECK("vsync for ext display path not enabled yet(2)\n");
 		mutex_unlock(&vsync_mtx);
+		_ext_disp_path_unlock();
 		return -1;
 	}
 	mutex_unlock(&vsync_mtx);
 	/* DISPMSG("vsync signaled\n"); */
 	c->vsync_ts = get_current_time_us();
 	c->vsync_cnt++;
+
+	_ext_disp_path_unlock();
 
 	return ret;
 }
@@ -2210,7 +2225,7 @@ static int extd_disp_config_output(void)
 	static int cur_wdma_security;
 #endif
 
-	_ext_disp_path_lock();
+	/* _ext_disp_path_lock(); */
 
 	/* config ovl1->wdma1 */
 	cmdq_handle = pgc->cmdq_handle_config;
@@ -2288,7 +2303,7 @@ static int extd_disp_config_output(void)
 
 	ret = dpmgr_path_config(pgc->ovl2mem_path_handle, pconfig, cmdq_handle);
 
-	_ext_disp_path_unlock();
+	/* _ext_disp_path_unlock(); */
 
 	return ret;
 }
@@ -2396,6 +2411,7 @@ int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
 	int ret = 0;
 	/* DISPFUNC(); */
 
+	_ext_disp_path_lock();
 #ifdef HDMI_SUB_PATH
 	/*
 	   DISPMSG("%s hdmi_active %d state %d handle 0x%p 0x%p fac %d\n",
@@ -2416,6 +2432,7 @@ int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
 		DISPMSG("%s is_hdmi_active %d state %d dpmgr_handle not init yet!!!!\n",
 			__func__, is_hdmi_active(), pgc->state);
 
+		_ext_disp_path_unlock();
 		return -1;
 	} else if ((is_hdmi_active() == false) || (pgc->state != EXTD_RESUME)
 		   || pgc->need_trigger_overlay < 1) {
@@ -2425,6 +2442,7 @@ int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
 
 		MMProfileLogEx(ddp_mmp_get_events()->Extd_ErrorInfo, MMProfileFlagPulse, Trigger,
 			       0);
+		_ext_disp_path_unlock();
 		return -1;
 	}
 #else
@@ -2436,17 +2454,20 @@ int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
 			mtkfb_release_layer_fence(ext_disp_get_sess_id(), i);
 		MMProfileLogEx(ddp_mmp_get_events()->Extd_ErrorInfo, MMProfileFlagPulse, Trigger,
 			       0);
+		_ext_disp_path_unlock();
 		return -1;
 	}
 #endif
 
-	if (hdmi_is_interlace && !_is_hdmi_decouple_mode(pgc->mode) && !_should_start_path())
+	if (hdmi_is_interlace && !_is_hdmi_decouple_mode(pgc->mode) && !_should_start_path()) {
+		_ext_disp_path_unlock();
 		return 0;
+	}
 
 	if (_is_hdmi_decouple_mode(pgc->mode))
 		extd_disp_config_output();
 
-	_ext_disp_path_lock();
+	/* _ext_disp_path_lock(); */
 
 	if (_should_trigger_interface()) {
 		_trigger_display_interface(blocking, _extd_cmdq_finish_callback, userdata);
@@ -2738,6 +2759,10 @@ int ext_disp_is_sleepd(void)
 }
 
 
+int ext_disp_get_state(void)
+{
+	return pgc->state;
+}
 
 int ext_disp_get_width(void)
 {

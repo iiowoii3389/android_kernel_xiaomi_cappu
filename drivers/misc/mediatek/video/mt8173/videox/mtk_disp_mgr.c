@@ -649,8 +649,10 @@ int _ioctl_prepare_present_fence(unsigned long arg)
 	}
 
 	if (use_present_fence == 0) {
+#if 0
 		DISPERR("non-primary ask for present fence! session=0x%x\n",
 			preset_fence_struct.session_id);
+#endif
 		data.fence = MTK_FB_INVALID_FENCE_FD;
 		data.value = 0;
 	} else {
@@ -1167,6 +1169,18 @@ static int set_memory_buffer(disp_session_input_config session_input)
 		dst_mva = 0;
 		layer_id = session_input.config[i].layer_id;
 		if (session_input.config[i].layer_enable) {
+			if (session_input.config[i].buffer_source == DISP_BUFFER_ALPHA) {
+				DISPPR_FENCE("ML %d is dim layer,fence %d\n",
+						session_input.config[i].layer_id,
+						session_input.config[i].next_buff_idx);
+				session_input.config[i].sur_aen = 0;
+				session_input.config[i].src_fmt = DISP_FORMAT_RGB888;
+				session_input.config[i].src_pitch = session_input.config[i].src_width;
+				session_input.config[i].src_phy_addr = (void *)get_dim_layer_mva_addr();
+				session_input.config[i].next_buff_idx = 0;
+				session_input.config[i].security = DISP_NORMAL_BUFFER;
+			}
+
 			if (session_input.config[i].src_phy_addr) {
 				dst_mva =
 				    (unsigned int)(unsigned long)session_input.
@@ -1251,14 +1265,34 @@ static int set_external_buffer(disp_session_input_config session_input)
 		dst_mva = 0;
 		layer_id = session_input.config[i].layer_id;
 		if (session_input.config[i].layer_enable) {
+			if (session_input.config[i].buffer_source == DISP_BUFFER_ALPHA) {
+				DISPPR_FENCE("EL %d is dim layer,fence %d\n",
+						session_input.config[i].layer_id,
+						session_input.config[i].next_buff_idx);
+				session_input.config[i].src_offset_x = 0;
+				session_input.config[i].src_offset_y = 0;
+				/* session_input.config[i].tgt_offset_x = 0; */
+				/* session_input.config[i].tgt_offset_y = 0; */
+				session_input.config[i].sur_aen = 0;
+				session_input.config[i].src_fmt = DISP_FORMAT_RGB888;
+				session_input.config[i].src_pitch = session_input.config[i].src_width;
+				session_input.config[i].src_phy_addr = (void *)get_dim_layer_mva_addr();
+				session_input.config[i].next_buff_idx = 0;
+				/* force dim layer as non-sec */
+				session_input.config[i].security = DISP_NORMAL_BUFFER;
+			}
+
 			if (session_input.config[i].src_phy_addr) {
 				dst_mva =
 				    (unsigned int)(unsigned long)session_input.
 				    config[i].src_phy_addr;
 			} else {
-				disp_sync_query_buf_info(session_id, layer_id, (unsigned int)
-							 session_input.config[i].next_buff_idx,
-							 &dst_mva, &dst_size);
+				if ((is_hdmi_active() == false) || (ext_disp_get_state() != 2))
+					;
+				else
+					disp_sync_query_buf_info(session_id, layer_id, (unsigned int)
+								 session_input.config[i].next_buff_idx,
+								 &dst_mva, &dst_size);
 				/* if(dst_size <
 				   session_input.config[i].src_pitch *
 				   session_input.config[i].src_height) */
@@ -1366,6 +1400,21 @@ static int set_primary_buffer(disp_session_input_config session_input)
 		}
 
 		if (session_input.config[i].layer_enable) {
+			if (session_input.config[i].buffer_source == DISP_BUFFER_ALPHA) {
+				DISPPR_FENCE("PL %d is dim layer,fence %d\n",
+						session_input.config[i].layer_id,
+						session_input.config[i].next_buff_idx);
+				session_input.config[i].src_offset_x = 0;
+				session_input.config[i].src_offset_y = 0;
+				session_input.config[i].sur_aen = 0;
+				session_input.config[i].src_fmt = DISP_FORMAT_RGB888;
+				session_input.config[i].src_pitch = session_input.config[i].src_width;
+				session_input.config[i].src_phy_addr = (void *)get_dim_layer_mva_addr();
+				session_input.config[i].next_buff_idx = 0;
+				/* force dim layer as non-sec */
+				session_input.config[i].security = DISP_NORMAL_BUFFER;
+			}
+
 			if (session_input.config[i].src_phy_addr) {
 				dst_mva =
 				    (unsigned int)(unsigned long)session_input.
@@ -1451,53 +1500,59 @@ int _ioctl_set_input_buffer(unsigned long arg)
 	int ret = 0;
 	void __user *argp = (void __user *)arg;
 	unsigned int session_id = 0;
-	disp_session_input_config session_input;
 	disp_session_sync_info *session_info;
+	disp_session_input_config *s_session_input;
 
-	if (copy_from_user(&session_input, argp, sizeof(session_input))) {
+	s_session_input = kmalloc(sizeof(disp_session_input_config), GFP_KERNEL);
+
+	if (copy_from_user(s_session_input, argp, sizeof(disp_session_input_config))) {
 		DISPMSG("[FB]: copy_from_user failed! line:%d\n", __LINE__);
+		kfree(s_session_input);
 		return -EFAULT;
 	}
 
-	session_id = session_input.session_id;
+	session_id = s_session_input->session_id;
 	session_info = disp_get_session_sync_info_for_debug(session_id);
 	if (session_info)
-		dprec_start(&session_info->event_setinput, 0, session_input.config_layer_num);
+		dprec_start(&session_info->event_setinput, 0, s_session_input->config_layer_num);
 
 	DISPPR_FENCE("S+/%s%d/count%d\n", disp_session_mode_spy(session_id),
-		     DISP_SESSION_DEV(session_id), session_input.config_layer_num);
+		     DISP_SESSION_DEV(session_id), s_session_input->config_layer_num);
 
 	DISP_PRINTF(DDP_RESOLUTION_LOG,
 		    "set_input_buffer/%s%d/count%d src(%d %d %d %d, %d) en %d fmt 0x%x dst(%d %d %d %d)\n",
 		    disp_session_mode_spy(session_id),
 		    DISP_SESSION_DEV(session_id),
-		    session_input.config_layer_num,
-		    session_input.config[0].src_offset_x,
-		    session_input.config[0].src_offset_y,
-		    session_input.config[0].src_width,
-		    session_input.config[0].src_height,
-		    session_input.config[0].src_pitch,
-		    session_input.config[0].layer_enable,
-		    session_input.config[0].src_fmt,
-		    session_input.config[0].tgt_offset_x,
-		    session_input.config[0].tgt_offset_y,
-		    session_input.config[0].tgt_width, session_input.config[0].tgt_height);
+		    s_session_input->config_layer_num,
+		    s_session_input->config[0].src_offset_x,
+		    s_session_input->config[0].src_offset_y,
+		    s_session_input->config[0].src_width,
+		    s_session_input->config[0].src_height,
+		    s_session_input->config[0].src_pitch,
+		    s_session_input->config[0].layer_enable,
+		    s_session_input->config[0].src_fmt,
+		    s_session_input->config[0].tgt_offset_x,
+		    s_session_input->config[0].tgt_offset_y,
+		    s_session_input->config[0].tgt_width, s_session_input->config[0].tgt_height);
 
 	if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_PRIMARY)
-		ret = set_primary_buffer(session_input);
+		ret = set_primary_buffer(*s_session_input);
 	else if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_EXTERNAL) {
 		MMProfileLogEx(ddp_mmp_get_events()->Extd_config,
 			       MMProfileFlagPulse, session_id, 0);
-		ret = set_external_buffer(session_input);
+		ret = set_external_buffer(*s_session_input);
 	} else if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_MEMORY)
-		ret = set_memory_buffer(session_input);
+		ret = set_memory_buffer(*s_session_input);
 	else {
 		DISPERR("session type is wrong:0x%08x\n", session_id);
+		kfree(s_session_input);
 		return -1;
 	}
 
 	if (session_info)
-		dprec_done(&session_info->event_setinput, 0, session_input.config_layer_num);
+		dprec_done(&session_info->event_setinput, 0, s_session_input->config_layer_num);
+
+	kfree(s_session_input);
 
 	return ret;
 }
@@ -1837,7 +1892,13 @@ int _ioctl_wait_vsync(unsigned long arg)
 	ret = ext_disp_wait_for_vsync(&vsync_config);
 
 #else
-	ret = primary_display_wait_for_vsync(&vsync_config);
+	if (DISP_SESSION_TYPE(vsync_config.session_id) == DISP_SESSION_EXTERNAL) {
+#ifdef CONFIG_MTK_HDMI_SUPPORT
+		ret = ext_disp_wait_for_vsync(&vsync_config);
+#endif
+	}
+	else
+		ret = primary_display_wait_for_vsync(&vsync_config);
 #endif
 
 	if (session_info)
@@ -1846,6 +1907,53 @@ int _ioctl_wait_vsync(unsigned long arg)
 	if (copy_to_user(argp, &vsync_config, sizeof(vsync_config))) {
 		DISPPR_ERROR("[FB]: copy_to_user failed! line:%d\n", __LINE__);
 		return -EFAULT;
+	}
+
+	return ret;
+}
+
+int _ioctl_get_display_caps(unsigned long arg)
+{
+	int ret = 0;
+	disp_caps_info caps_info;
+	void __user *argp = (void __user *)arg;
+
+	if (copy_from_user(&caps_info, argp, sizeof(caps_info))) {
+		DISPMSG("[FB]: copy_to_user failed! line:%d\n", __LINE__);
+		ret = -EFAULT;
+	}
+#ifdef DISP_HW_MODE_CAP
+	caps_info.output_mode = DISP_HW_MODE_CAP;
+#else
+	caps_info.output_mode = DISP_OUTPUT_CAP_DIRECT_LINK;
+#endif
+
+#ifdef DISP_HW_PASS_MODE
+	caps_info.output_pass = DISP_HW_PASS_MODE;
+#else
+	caps_info.output_pass = DISP_OUTPUT_CAP_SINGLE_PASS;
+#endif
+
+#ifdef DISP_HW_MAX_LAYER
+	caps_info.max_layer_num = DISP_HW_MAX_LAYER;
+#else
+	caps_info.max_layer_num = 4;
+#endif
+
+	caps_info.disp_feature = 0;
+	caps_info.is_support_frame_cfg_ioctl = 0;
+#ifdef OVL_TIME_SHARING
+	caps_info.disp_feature |= DISP_FEATURE_TIME_SHARING;
+#endif
+
+	caps_info.disp_feature |= DISP_FEATURE_NO_PARGB;
+
+	DISPMSG("%s mode:%d, pass:%d, max_layer_num:%d\n",
+		__func__, caps_info.output_mode, caps_info.output_pass, caps_info.max_layer_num);
+
+	if (copy_to_user(argp, &caps_info, sizeof(caps_info))) {
+		DISPMSG("[FB]: copy_to_user failed! line:%d\n", __LINE__);
+		ret = -EFAULT;
 	}
 
 	return ret;
@@ -2074,6 +2182,8 @@ const char *_session_ioctl_spy(unsigned int cmd)
 		return "DISP_IOCTL_GET_PQ_GAL_PARAM";
 	case DISP_IOCTL_OD_CTL:
 		return "DISP_IOCTL_OD_CTL";
+	case DISP_IOCTL_GET_DISPLAY_CAPS:
+		return "DISP_IOCTL_GET_DISPLAY_CAPS";
 	default:
 		{
 			return "unknown";
@@ -2121,6 +2231,10 @@ long mtk_disp_mgr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		{
 			return _ioctl_get_info(arg);
 		}
+	case DISP_IOCTL_GET_DISPLAY_CAPS:
+		{
+			return _ioctl_get_display_caps(arg);
+		}
 	case DISP_IOCTL_SET_VSYNC_FPS:
 		{
 			return _ioctl_set_vsync(arg);
@@ -2137,7 +2251,10 @@ long mtk_disp_mgr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		{
 			return _ioctl_set_output_buffer(arg);
 		}
-	case DISP_IOCTL_SET_COLOR_REG:
+	case DISP_IOCTL_GET_LCMINDEX:
+		{
+			return 0;
+		}
 	case DISP_IOCTL_AAL_EVENTCTL:
 	case DISP_IOCTL_AAL_GET_HIST:
 	case DISP_IOCTL_AAL_INIT_REG:
@@ -2150,6 +2267,7 @@ long mtk_disp_mgr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case DISP_IOCTL_GET_C1_PQPARAM:
 	case DISP_IOCTL_SET_PQINDEX:
 	case DISP_IOCTL_GET_PQINDEX:
+	case DISP_IOCTL_SET_COLOR_REG:
 	case DISP_IOCTL_SET_TDSHPINDEX:
 	case DISP_IOCTL_GET_TDSHPINDEX:
 	case DISP_IOCTL_SET_PQ_CAM_PARAM:
@@ -2239,6 +2357,8 @@ static long mtk_disp_mgr_compat_ioctl(struct file *file, unsigned int cmd,  unsi
 	case DISP_IOCTL_SET_PQPARAM:
 	case DISP_IOCTL_GET_PQPARAM:
 	case DISP_IOCTL_SET_PQINDEX:
+	case DISP_IOCTL_GET_PQINDEX:
+	case DISP_IOCTL_SET_COLOR_REG:
 	case DISP_IOCTL_SET_TDSHPINDEX:
 	case DISP_IOCTL_GET_TDSHPINDEX:
 	case DISP_IOCTL_SET_PQ_CAM_PARAM:

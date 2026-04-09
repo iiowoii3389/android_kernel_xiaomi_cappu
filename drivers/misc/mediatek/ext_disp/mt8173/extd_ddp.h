@@ -14,8 +14,8 @@
 #ifndef _EXTD_DDP_H_
 #define _EXTD_DDP_H_
 
-#include "../../../video/mt8173/dispsys/ddp_hal.h"
-#include "../../../video/mt8173/dispsys/ddp_manager.h"
+#include "../../video/mt8173/dispsys/ddp_hal.h"
+#include "../../video/mt8173/dispsys/ddp_manager.h"
 
 typedef enum {
 	EXTD_DIRECT_LINK_MODE,
@@ -179,6 +179,7 @@ unsigned int ext_disp_get_sess_id(void);
 int ext_disp_set_overlay_layer(ext_disp_input_config *input);
 int ext_disp_is_alive(void);
 int ext_disp_is_sleepd(void);
+int ext_disp_get_state(void);
 int ext_disp_wait_for_vsync(void *config);
 int ext_disp_config_input(ext_disp_input_config *input);
 int ext_disp_config_input_multiple(ext_disp_input_config *input,

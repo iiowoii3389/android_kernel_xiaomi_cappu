@@ -543,6 +543,10 @@ unsigned int mtkfb_update_buf_ticket(unsigned int session_id, unsigned int layer
 	}
 
 	session_info = _get_session_sync_info(session_id);
+	if (session_info == NULL) {
+		DISPERR("session_info NULL\n");
+		return mva;
+	}
 	layer_info = &(session_info->session_layer_info[layer_id]);
 	if (layer_id != layer_info->layer_id) {
 		DISPERR("wrong layer id %d(rt), %d(in)!\n", layer_info->layer_id, layer_id);

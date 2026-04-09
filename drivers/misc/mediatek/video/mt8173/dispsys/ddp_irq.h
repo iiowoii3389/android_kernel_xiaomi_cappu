@@ -29,6 +29,5 @@ void disp_register_irq(unsigned int irq_num, char *device_name);
 int ddp_irq_init(void);
 void disp_dump_emi_status(void);
 irqreturn_t disp_irq_handler(int irq, void *dev_id);
-extern int primary_display_esd_cust_get(void);
 
 #endif

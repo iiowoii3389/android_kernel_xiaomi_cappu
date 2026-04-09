@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
- * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -57,6 +56,7 @@ static ddp_module_notify g_ddp_notify;
 static volatile int g_aal_hist_available;
 static volatile int g_aal_dirty_frame_retrieved = 1;
 static volatile int g_aal_is_init_regs_valid;
+static atomic_t g_aal_allowPartial = ATOMIC_INIT(0);
 
 static int disp_aal_init(DISP_MODULE_ENUM module, int width, int height, void *cmdq)
 {
@@ -157,6 +157,8 @@ void disp_aal_on_end_of_frame(void)
 
 			for (i = 0; i < AAL_HIST_BIN; i++)
 				g_aal_hist.maxHist[i] = DISP_REG_GET(DISP_AAL_STATUS_00 + (i << 2));
+			g_aal_hist.colorHist = DISP_REG_GET(DISP_COLOR_TWO_D_W1_RESULT);
+
 			g_aal_hist_available = 1;
 
 			/* Allow to disable interrupt */
@@ -325,6 +327,7 @@ int disp_aal_set_param(DISP_AAL_PARAM __user *param, void *cmdq)
 			g_aal_param.cabc_fltgain_force = 0;
 #endif
 		ret = disp_aal_write_param_to_reg(cmdq, &g_aal_param);
+		atomic_set(&g_aal_allowPartial, g_aal_param.allowPartial);
 	}
 
 	if (ret == 0)
@@ -456,6 +459,32 @@ int aal_bypass(DISP_MODULE_ENUM module, int bypass)
 	DISP_REG_MASK(NULL, DISP_AAL_CFG, relay, 0x1);
 
 	AAL_DBG("aal_bypass(bypass = %d)", bypass);
+
+	return 0;
+}
+
+int aal_is_partial_support(void)
+{
+	int allowPartial;
+#ifdef CONFIG_MTK_AAL_SUPPORT
+	allowPartial = atomic_read(&g_aal_allowPartial);
+#else
+	allowPartial = 1;
+#endif
+	AAL_DBG("aal_is_partial_support=%d", allowPartial);
+
+	return allowPartial;
+}
+
+int aal_request_partial_support(int partial)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&g_aal_hist_lock, flags);
+	g_aal_hist.requestPartial = partial;
+	spin_unlock_irqrestore(&g_aal_hist_lock, flags);
+
+	AAL_DBG("aal_request_partial_support: %d", partial);
 
 	return 0;
 }

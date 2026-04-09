@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
- * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -26,6 +25,8 @@
 /*static disp_lcm_handle _disp_lcm_driver[MAX_LCM_NUMBER] = { {0}, {0} };*/
 
 /* these 2 variables are defined in mt65xx_lcm_list.c */
+// tongjun@roco Add for hall
+bool lcd_hall_status = false;
 
 int _lcm_count(void)
 {
@@ -733,33 +734,11 @@ int disp_lcm_suspend(disp_lcm_handle *plcm)
 		if (lcm_drv->suspend_power)
 			lcm_drv->suspend_power();
 
-
+		lcd_hall_status = true;  //// tongjun@roco Add for hall
 		return 0;
 	}
 	DISPERR("lcm_drv is null\n");
 	return -1;
-}
-
-int disp_lcm_resume_power(disp_lcm_handle *plcm)
-{
-	/*DISPFUNC(); */
-	LCM_DRIVER *lcm_drv = NULL;
-	int ret = 0;
-
-	DISPFUNC();
-
-	if (_is_lcm_inited(plcm)) {
-		lcm_drv = plcm->drv;
-
-		if (lcm_drv->resume_power)
-			lcm_drv->resume_power();
-
-	} else {
-		ret = -1;
-		DISPERR("lcm_drv is null\n");
-	}
-
-	return ret;
 }
 
 int disp_lcm_resume(disp_lcm_handle *plcm)
@@ -772,10 +751,8 @@ int disp_lcm_resume(disp_lcm_handle *plcm)
 	if (_is_lcm_inited(plcm)) {
 		lcm_drv = plcm->drv;
 
-		/*
 		if (lcm_drv->resume_power)
 			lcm_drv->resume_power();
-		*/
 
 		if (lcm_drv->resume) {
 			lcm_drv->resume();
@@ -783,7 +760,7 @@ int disp_lcm_resume(disp_lcm_handle *plcm)
 			DISPERR("FATAL ERROR, lcm_drv->resume is null\n");
 			return -1;
 		}
-
+		lcd_hall_status = false; // tongjun@roco Add for hall
 		return 0;
 	}
 	DISPERR("lcm_drv is null\n");

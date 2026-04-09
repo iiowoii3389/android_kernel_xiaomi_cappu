@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
- * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -19,6 +18,7 @@
 /* #include <mach/mt_reg_base.h> */
 #include <linux/clk.h>
 #include <mt-plat/mt_gpio.h>
+#include "ddp_aal.h"
 #include "ddp_reg.h"
 #include "ddp_pwm.h"
 #include "ddp_path.h"
@@ -31,6 +31,8 @@
 #define PWM_ERR(fmt, arg...) DDPERR("[PWM] " fmt "\n", ##arg)
 #define PWM_MSG(fmt, arg...) DDPMSG("[PWM] " fmt "\n", ##arg)
 #define PWM_NOTICE(fmt, arg...) DDPMSG("[PWM] " fmt "\n", ##arg)
+#define PWM_DBG(fmt, arg...) \
+	do { if (aal_dbg_en) pr_info("[PWM] " fmt "\n", ##arg); } while (0)
 
 #define pwm_get_reg_base(id) ((id) == DISP_PWM0 ? DISPSYS_PWM0_BASE : DISPSYS_PWM1_BASE)
 
@@ -231,8 +233,6 @@ int disp_pwm_set_backlight(disp_pwm_id_t id, int level_1024)
 	if (ret >= 0)
 		disp_pwm_trigger_refresh(id);
 
-	lp855x_set_backlight_level(level_1024);
-
 	return 0;
 }
 
@@ -261,12 +261,12 @@ int disp_pwm_set_backlight_cmdq(disp_pwm_id_t id, int level_1024, void *cmdq)
 
 		if (old_pwm == 0 || level_1024 == 0 || abs_diff > 64) {
 			/* To be printed in UART log */
-			PWM_NOTICE
+			PWM_DBG
 			    ("disp_pwm_set_backlight_cmdq(id = 0x%x, level_1024 = %d), old = %d",
 			     id, level_1024, old_pwm);
 		} else {
-			PWM_MSG("disp_pwm_set_backlight_cmdq(id = 0x%x, level_1024 = %d), old = %d",
-				id, level_1024, old_pwm);
+			PWM_DBG("%s:(id = 0x%x,level_1024 = %d), old = %d",
+				__func__, id, level_1024, old_pwm);
 		}
 
 		if (level_1024 > g_pwm_max_backlight[index])
@@ -293,7 +293,7 @@ int disp_pwm_set_backlight_cmdq(disp_pwm_id_t id, int level_1024, void *cmdq)
 	} else {
 		g_pwm_duplicate_count = (g_pwm_duplicate_count + 1) & 63;
 		if (g_pwm_duplicate_count == 2) {
-			PWM_MSG
+			PWM_DBG
 			    ("disp_pwm_set_backlight_cmdq(id = 0x%x, level_1024 = %d), old = %d (dup)",
 			     id, level_1024, old_pwm);
 		}

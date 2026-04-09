@@ -403,11 +403,10 @@ void rdma_set_ultra(unsigned int idx, unsigned int width, unsigned int height, u
 	/* write ultra_low_level, ultra_high_ofs, pre_ultra_low_ofs, pre_ultra_high_ofs */
 	/*into register DISP_RDMA_MEM_GMC_SETTING_0 */
 	DISP_REG_SET(handle, idx * DISP_RDMA_INDEX_OFFSET + DISP_REG_RDMA_MEM_GMC_SETTING_0,
-		     ultra_low_level | (pre_ultra_low_ofs << 8) | (ultra_high_ofs << 16) |
-		     (pre_ultra_high_ofs << 24));
+		     0x0101ffff);
 	DISP_REG_SET_FIELD(handle, FIFO_CON_FLD_OUTPUT_VALID_FIFO_THRESHOLD,
 			   idx * DISP_RDMA_INDEX_OFFSET + DISP_REG_RDMA_FIFO_CON,
-			   ((ultra_low_level+pre_ultra_low_ofs) > 0x200) ? 0x200 : (ultra_low_level+pre_ultra_low_ofs));
+			   0x200/*((ultra_low_level+pre_ultra_low_ofs) > 0x200) ? 0x200 : (ultra_low_level+pre_ultra_low_ofs)*/);
 
 	DDPDBG("ultra_low_level      = 0x%03x = %d\n", ultra_low_level, ultra_low_level);
 	DDPDBG("pre_ultra_low_level  = 0x%03x = %d\n", pre_ultra_low_level, pre_ultra_low_level);

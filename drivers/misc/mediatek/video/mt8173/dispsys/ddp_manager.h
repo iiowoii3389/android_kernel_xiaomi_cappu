@@ -330,6 +330,16 @@ int dpmgr_wait_event_timeout(disp_path_handle dp_handle, DISP_PATH_EVENT event, 
 int dpmgr_wait_event(disp_path_handle dp_handle, DISP_PATH_EVENT event);
 
 
+/* wait event
+ * return :
+ * 0 , wait succesfull.
+ * <0, wait error.
+ * event : disp event.
+ * event_ts : for hwc get real timestamp
+ * timeout :(ms).
+*/
+int dpmgr_wait_event_ts(disp_path_handle dp_handle, DISP_PATH_EVENT event, unsigned long long *event_ts);
+
 /* power on, turn on each modules clk.
  * return 0.
 * dp_handle: disp path handle.

@@ -31,6 +31,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/kernel.h>
 #include <linux/bug.h>
+#include <linux/pm_wakeup.h>
 
 #include <trace/events/mtk_events.h>
 #include <linux/mtk_gpu_utility.h>
@@ -163,10 +164,18 @@ static IMG_VOID mtk_mfg_enable_clock(void)
 	int i;
 	struct mtk_mfg_base *mfg_base = GET_MTK_MFG_BASE(sPVRLDMDev);
 
-	/* Resume power on vgpu and mfg power domain */
-	/* move the BUCKB turn on/off to scpsys */
-	/* mt_gpufreq_voltage_enable_set(1); */
+	/*
+	** Hold wakelock when mfg power-on, prevent suspend when gpu active.
+	** When enter system suspend flow, forbbiden power domain control.
+	** If power domain can control, async/2d/mfg has sequence issue.
+	*/
+	pm_stay_awake(&mfg_base->mfg_async_pdev->dev);
+
+	/* Resume mfg_async power domain */
 	pm_runtime_get_sync(&mfg_base->mfg_async_pdev->dev);
+
+	/* Vgpu is power on when resume mfg_async power domain in scpsys */
+	mt_gpufreq_voltage_enable_set(1);
 
 	/* Resume mfg/mfg_2d power domain */
 	pm_runtime_get_sync(&mfg_base->mfg_2d_pdev->dev);
@@ -210,10 +219,14 @@ static IMG_VOID mtk_mfg_disable_clock(void)
 	pm_runtime_put_sync(&mfg_base->pdev->dev);
 	pm_runtime_put_sync(&mfg_base->mfg_2d_pdev->dev);
 
-	/* Suspend mfg power domain and power off vgpu */
+	/* Vgpu is power off when suspend mfg_async power domain in scpsys */
+	mt_gpufreq_voltage_enable_set(0);
+
+	/* Suspend mfg_async power domain */
 	pm_runtime_put_sync(&mfg_base->mfg_async_pdev->dev);
-	/* move the BUCKB turn on/off to scpsys */
-	/* mt_gpufreq_voltage_enable_set(0); */
+
+	/* Release wakelock when mfg power-off */
+	pm_relax(&mfg_base->mfg_async_pdev->dev);
 }
 
 static int mfg_notify_handler(struct notifier_block *this, unsigned long code,
@@ -378,6 +391,14 @@ static int mtk_mfg_unbind_device_resource(struct platform_device *pdev,
 	return 0;
 }
 
+
+static IMG_BOOL bCoreinitSucceeded = IMG_FALSE;
+bool mt_gpucore_ready(void)
+{
+	return (IMG_TRUE == bCoreinitSucceeded);
+}
+EXPORT_SYMBOL(mt_gpucore_ready);
+
 int MTKMFGBaseInit(struct platform_device *pdev)
 {
 	int err;
@@ -397,6 +418,7 @@ int MTKMFGBaseInit(struct platform_device *pdev)
 	pdev->dev.platform_data = mfg_base;
 	sPVRLDMDev = pdev;
 
+	bCoreinitSucceeded = IMG_TRUE;
 	return 0;
 }
 
@@ -723,14 +745,6 @@ PVRSRV_ERROR MTKSystemPostPowerState(PVRSRV_SYS_POWER_STATE eNewPowerState)
 }
 
 
-static IMG_BOOL bCoreinitSucceeded = IMG_FALSE;
-bool mt_gpucore_ready(void)
-{
-	return (IMG_TRUE == bCoreinitSucceeded);
-}
-EXPORT_SYMBOL(mt_gpucore_ready);
-
-
 PVRSRV_ERROR MTKMFGSystemInit(void)
 {
 #ifdef CONFIG_MTK_HIBERNATION
@@ -761,7 +775,6 @@ PVRSRV_ERROR MTKMFGSystemInit(void)
 
 	mt_gpufreq_mfgclock_notify_registerCB(MTKEnableClock, MTKDisableClock);
 
-	bCoreinitSucceeded = IMG_TRUE;
 	return PVRSRV_OK;
 }
 
@@ -795,11 +808,15 @@ static int mtk_mfg_async_probe(struct platform_device *pdev)
 
 	sMFGASYNCDev = pdev;
 	pm_runtime_enable(&pdev->dev);
+
+	/* Use async power domain as a system suspend indicator. */
+	device_init_wakeup(&pdev->dev, true);
 	return 0;
 }
 
 static int mtk_mfg_async_remove(struct platform_device *pdev)
 {
+	device_init_wakeup(&pdev->dev, false);
 	pm_runtime_disable(&pdev->dev);
 	return 0;
 }

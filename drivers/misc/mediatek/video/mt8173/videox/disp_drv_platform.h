@@ -32,10 +32,6 @@
 
 #include <mt-plat/sync_write.h>
 
-#ifdef CONFIG_MTK_TC8_TABLET_RELEASE_ONLY
-#define MTK_DISP_IDLE_LP
-#endif
-
 #define MTKFB_NO_M4U
 /* #define MTK_LCD_HW_3D_SUPPORT */
 #define ALIGN_TO(x, n)  \

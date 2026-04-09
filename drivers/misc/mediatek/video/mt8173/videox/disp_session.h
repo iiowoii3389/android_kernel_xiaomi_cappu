@@ -27,7 +27,7 @@
 #define DISP_SESSION_DEV(id) ((id)&0xff)
 #define MAKE_DISP_SESSION(type, dev) (unsigned int)((type) << 16 | (dev))
 
-
+#define RSZ_RES_LIST_NUM 4
 
 /* /============================================================================= */
 /* structure declarations */
@@ -41,7 +41,9 @@ typedef enum {
 	DISP_IF_TYPE_DSIDUAL,
 	DISP_IF_HDMI = 7,
 	DISP_IF_HDMI_SMARTBOOK,
-	DISP_IF_MHL
+	DISP_IF_MHL,
+	DISP_IF_EPD,
+	DISP_IF_SLIMPORT
 } DISP_IF_TYPE;
 
 typedef enum {
@@ -81,6 +83,11 @@ typedef enum {
 	DISP_FORMAT_UYVY = MAKE_DISP_FORMAT_ID(13, 2),
 	DISP_FORMAT_YUV420_P = MAKE_DISP_FORMAT_ID(14, 2),
 	DISP_FORMAT_YV12 = MAKE_DISP_FORMAT_ID(16, 1),	/* BPP = 1.5 */
+	DISP_FORMAT_PARGB8888 = MAKE_DISP_FORMAT_ID(17, 4),
+	DISP_FORMAT_PABGR8888 = MAKE_DISP_FORMAT_ID(18, 4),
+	DISP_FORMAT_PRGBA8888 = MAKE_DISP_FORMAT_ID(19, 4),
+	DISP_FORMAT_PBGRA8888 = MAKE_DISP_FORMAT_ID(20, 4),
+	DISP_FORMAT_DIM = MAKE_DISP_FORMAT_ID(21, 0),
 	DISP_FORMAT_BPP_MASK = 0xFF,
 } DISP_FORMAT;
 
@@ -146,6 +153,15 @@ typedef enum {
 } DISP_MODE;
 
 typedef enum {
+	SESSION_USER_INVALID = -1,
+	SESSION_USER_HWC = 0,
+	SESSION_USER_GUIEXT = 1,
+	SESSION_USER_AEE = 2,
+	SESSION_USER_PANDISP = 3,
+	SESSION_USER_CNT,
+} DISP_SESSION_USER;
+
+typedef enum {
 	DISP_OUTPUT_UNKNOWN				= 0,
 	DISP_OUTPUT_MEMORY				= 1,
 	DISP_OUTPUT_DECOUPLE			= 2,
@@ -153,12 +169,18 @@ typedef enum {
 	DISP_OUTPUT_DIRECT_LINK_MIRROR	= 4,
 } DISP_OUTPUT_TYPE;
 
+typedef enum {
+	TRIGGER_NORMAL,
+	TRIGGER_SUSPEND,
+	TRIGGER_RESUME,
+	TRIGGER_MODE_MAX_NUM
+} EXTD_TRIGGER_MODE;
 
 
 typedef struct disp_session_config_t {
 	unsigned int type;
 	unsigned int device_id;
-	unsigned int mode;
+	DISP_MODE mode;
 	unsigned int session_id;
 	unsigned int present_fence_idx;
 	unsigned int output_type;
@@ -169,6 +191,13 @@ typedef struct {
 	unsigned int vsync_cnt;
 	uint64_t vsync_ts;
 } disp_session_vsync_config;
+
+struct layer_dirty_roi {
+	__u16 dirty_x;
+	__u16 dirty_y;
+	__u16 dirty_w;
+	__u16 dirty_h;
+};
 
 typedef struct disp_input_config_t {
 	unsigned int layer_id;
@@ -206,6 +235,10 @@ typedef struct disp_input_config_t {
 
 	unsigned int fps;
 	int64_t timestamp;
+	unsigned int ext_sel_layer;
+	int src_fence_fd;
+	void  *dirty_roi_addr;
+	unsigned int dirty_roi_num;
 } disp_input_config;
 
 typedef struct disp_output_config_t {
@@ -221,13 +254,22 @@ typedef struct disp_output_config_t {
 	unsigned int security;
 	unsigned int buff_idx;
 	unsigned int interface_idx;
+	int src_fence_fd;	/* fence to be waited before using this buffer. -1 if invalid */
+	void *src_fence_struct;		/* fence struct of src_fence_fd, used in kernel */
 	unsigned int frm_sequence;
 } disp_output_config;
+
+struct disp_ccorr_config {
+	bool is_dirty;
+	int mode;
+	int color_matrix[16];
+};
 
 typedef struct disp_session_input_config_t {
 	unsigned int session_id;
 	unsigned int config_layer_num;
 	disp_input_config config[MAX_INPUT_CONFIG];
+	struct disp_ccorr_config ccorr_config;
 } disp_session_input_config;
 
 typedef struct disp_session_output_config_t {
@@ -239,6 +281,35 @@ typedef struct disp_session_layer_num_config_t {
 	unsigned int session_id;
 	unsigned int max_layer_num;
 } disp_session_layer_num_config;
+
+struct disp_frame_cfg_t {
+	DISP_SESSION_USER setter;
+	unsigned int session_id;
+
+	/* input config */
+	unsigned int input_layer_num;
+	disp_input_config input_cfg[12];
+	unsigned int overlap_layer_num;
+
+	/* constant layer */
+	unsigned int const_layer_num;
+	disp_input_config const_layer[1];
+
+	/* output config */
+	int output_en;
+	disp_output_config output_cfg;
+
+	/* trigger config */
+	DISP_MODE mode;
+	unsigned int present_fence_idx;
+	int prev_present_fence_fd;
+	void *prev_present_fence_struct;
+	EXTD_TRIGGER_MODE tigger_mode;
+	DISP_SESSION_USER user;
+
+	/* ccorr config */
+	struct disp_ccorr_config ccorr_config;
+};
 
 typedef struct disp_session_info_t {
 	unsigned int session_id;
@@ -252,9 +323,18 @@ typedef struct disp_session_info_t {
 	unsigned int vsyncFPS;
 	unsigned int physicalWidth;
 	unsigned int physicalHeight;
+	unsigned int physicalWidthUm;	/* length: um, for more precise precision */
+	unsigned int physicalHeightUm;	/* length: um, for more precise precision */
+	unsigned int density;
 	unsigned int isConnected;
 	unsigned int isHDCPSupported;
 	unsigned int isOVLDisabled;
+	unsigned int is3DSupport;
+	unsigned int const_layer_num;
+	/* updateFPS: fps of HWC trigger display */
+	/* notes: for better Accuracy, updateFPS = real_fps*100 */
+	unsigned int updateFPS;
+	unsigned int is_updateFPS_stable;
 } disp_session_info;
 
 typedef struct disp_buffer_info_t {
@@ -276,7 +356,7 @@ typedef struct disp_present_fence_info_t {
 	/* input */
 	unsigned int session_id;
 	/* output */
-	unsigned int present_fence_fd;
+	int present_fence_fd;
 	unsigned int present_fence_index;
 } disp_present_fence;
 
@@ -300,12 +380,56 @@ typedef enum {
 	DISP_OUTPUT_CAP_MULTI_PASS,
 } DISP_CAP_OUTPUT_PASS;
 
+typedef enum {
+	DISP_FEATURE_TIME_SHARING = 0x00000001,
+	DISP_FEATURE_HRT = 0x00000002,
+	DISP_FEATURE_PARTIAL = 0x00000004,
+	DISP_FEATURE_FENCE_WAIT = 0x00000008,
+	DISP_FEATURE_RSZ = 0x00000010,
+	DISP_FEATURE_NO_PARGB = 0x00000020,
+} DISP_FEATURE;
+
 typedef struct disp_caps_t {
 	DISP_CAP_OUTPUT_MODE output_mode;
 	DISP_CAP_OUTPUT_PASS output_pass;
 	unsigned int max_layer_num;
+#ifdef CONFIG_FOR_SOURCE_PQ
+	unsigned int max_pq_num;
+#endif
+	unsigned int disp_feature;
+	int is_support_frame_cfg_ioctl;
+	int is_output_rotated;
+	int lcm_degree;
+	/* resizer input resolution list
+	 * format:
+	 *   sequence from big resolution to small
+	 *   portrait width first then height
+	 */
+	unsigned int rsz_in_res_list[RSZ_RES_LIST_NUM][2];
 } disp_caps_info;
 
+enum LAYERING_CAPS {
+	LAYERING_OVL_ONLY = 0x00000001,
+};
+
+typedef struct layer_config_t {
+	unsigned int ovl_id;
+	DISP_FORMAT src_fmt;
+	unsigned int dst_offset_x, dst_offset_y;
+	unsigned int dst_width, dst_height;
+	int ext_sel_layer;
+	unsigned int src_width, src_height;
+	unsigned int layer_caps;
+} layer_config;
+
+typedef struct disp_layer_info_t {
+	layer_config * input_config[2];
+	int disp_mode[2];
+	int layer_num[2];
+	int gles_head[2];
+	int gles_tail[2];
+	int hrt_num;
+} disp_layer_info;
 
 enum DISP_SCENARIO {
 	DISP_SCENARIO_NORMAL,
@@ -342,6 +466,10 @@ struct disp_scenario_config_t {
 #define	DISP_IOCTL_SET_VSYNC_FPS				DISP_IOW(215, unsigned int)
 #define	DISP_IOCTL_GET_PRESENT_FENCE			DISP_IOW(216, disp_present_fence)
 
+#define DISP_IOCTL_GET_DISPLAY_CAPS				DISP_IOW(218, disp_caps_info)
+#define	DISP_IOCTL_FRAME_CONFIG					DISP_IOW(219, disp_session_output_config)
+#define DISP_IOCTL_QUERY_VALID_LAYER				DISP_IOW(220, disp_layer_info)
+#define	DISP_IOCTL_WAIT_ALL_JOBS_DONE				DISP_IOW(221, unsigned int)
 #define	DISP_IOCTL_SET_SCENARIO				DISP_IOW(222, struct disp_scenario_config_t)
 
 #endif				/* __DISP_SESSION_H */

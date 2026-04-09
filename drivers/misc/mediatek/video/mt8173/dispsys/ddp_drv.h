@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
- * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -20,7 +19,7 @@
 #include "ddp_aal.h"
 #include "ddp_gamma.h"
 #include "disp_event.h"
-/*#include "../videox/DpDataType.h"*/
+#include "../videox/DpDataType.h"
 
 
 typedef struct {
@@ -56,7 +55,7 @@ typedef struct {
 	int layer;
 
 	unsigned long addr;
-	unsigned int fmt;
+	DpColorFormat fmt;
 
 	int x;
 	int y;
@@ -117,7 +116,7 @@ typedef struct {
 	int camera;
 } DISP_PQ_MAPPING_PARAM;
 
-typedef struct {
+struct DISPLAY_PQ {
 
 	unsigned int GLOBAL_SAT[GLOBAL_SAT_SIZE];
 	unsigned int CONTRAST[CONTRAST_SIZE];
@@ -133,7 +132,8 @@ typedef struct {
 	unsigned int SKY_TONE_H[COLOR_TUNING_INDEX][SKY_TONE_SIZE];
 	unsigned int CCORR_COEF[CCORR_COEF_CNT][3][3];
 
-} DISPLAY_PQ_T;
+};
+#define DISPLAY_PQ_T struct DISPLAY_PQ
 
 typedef struct {
 	unsigned int GLOBAL_SAT;
@@ -150,12 +150,12 @@ typedef struct {
 	unsigned int SKY_TONE_H[SKY_TONE_SIZE];
 } DISPLAY_COLOR_REG_T;
 
-typedef struct {
+struct DISPLAY_TDSHP {
 
 	unsigned int entry[THSHP_TUNING_INDEX][THSHP_PARAM_MAX];
 
-} DISPLAY_TDSHP_T;
-
+};
+#define DISPLAY_TDSHP_T struct DISPLAY_TDSHP
 
 typedef enum {
 	BlackEffectEnable = 0,
@@ -352,6 +352,5 @@ typedef enum {
 #define DISP_IOCTL_OD_CTL           _IOWR(DISP_IOCTL_MAGIC, 80 , DISP_OD_CMD)
 
 #define DISP_IOCTL_SET_PANEL_PARAM  _IOW(DISP_IOCTL_MAGIC, 81, DISP_PQ_DC_PARAM)
-
 
 #endif
