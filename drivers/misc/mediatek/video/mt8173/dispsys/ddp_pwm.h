@@ -37,4 +37,7 @@ int disp_pwm_get_max_backlight(disp_pwm_id_t id);
 int disp_bls_set_max_backlight(unsigned int level_1024);
 int disp_bls_set_backlight(int level_1024);
 
+/* For TI LP8556 to control backlight level*/
+extern int lp855x_set_backlight_level(unsigned int level);
+
 #endif

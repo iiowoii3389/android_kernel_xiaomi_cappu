@@ -233,6 +233,8 @@ int disp_pwm_set_backlight(disp_pwm_id_t id, int level_1024)
 	if (ret >= 0)
 		disp_pwm_trigger_refresh(id);
 
+	lp855x_set_backlight_level(level_1024);	
+
 	return 0;
 }
 
