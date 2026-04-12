@@ -585,8 +585,8 @@ CONFIG_BCMDHD_SDIO=y
 CONFIG_BCM4356=y
 CONFIG_DHD_USE_SCHED_SCAN=y
 CONFIG_DHD_OF_SUPPORT=y
-CONFIG_BCMDHD_FW_PATH="/etc/firmware/fw_bcmdhd.bin"
-CONFIG_BCMDHD_NVRAM_PATH="/etc/firmware/bcm94356wlsagbl_gpio_hwoob.txt"
+CONFIG_BCMDHD_FW_PATH="/vendor/etc/firmware/fw_bcmdhd.bin"
+CONFIG_BCMDHD_NVRAM_PATH="/vendor/etc/firmware/bcm94356wlsagbl_gpio_hwoob.txt"
 CONFIG_MTK_TC8_TABLET_RELEASE_ONLY=y
 
 CONFIG_NETWORK_FILESYSTEMS=y
