@@ -315,7 +315,7 @@ static int32_t cmdq_sec_fill_iwc_command_msg_unlocked(iwcCmdqMessage_t *pIwc,
 		pIwc->command.thread = thread;
 		pIwc->command.priority = pTask->priority;
 		pIwc->command.engineFlag = pTask->engineFlag;
-		pIwc->command.hNormalTask = (0LL | (uint64_t) (pTask));
+		pIwc->command.hNormalTask = (0LL | (unsigned long) (pTask));
 		pIwc->command.commandSize = pTask->bufferSize;
 
 		buffer_index = 0;

@@ -23,7 +23,7 @@
 #define CMDQ_GPR_SUPPORT
 
 #define CMDQ_DUMP_GIC (0)	/* TODO: enable when GIC porting done */
-#define CMDQ_PROFILE_MMP (0)
+/* #define CMDQ_PROFILE_MMP (0) */
 
 #include <linux/kernel.h>
 #include "cmdq_def_idv.h"
