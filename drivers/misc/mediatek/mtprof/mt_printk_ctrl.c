@@ -86,7 +86,10 @@ static int __init init_mt_printk_ctrl(void)
 {
 	struct proc_dir_entry *pe;
 
-	mt_need_uart_console = 0;	/* default, no uart */
+	mt_need_uart_console = 1;
+	printk_disable_uart = 0;
+	mt_enable_uart();
+	
 	pe = proc_create("mtprintk", 0664, NULL, &mt_printk_ctrl_fops);
 	if (!pe)
 		return -ENOMEM;
