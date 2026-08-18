@@ -1863,7 +1863,7 @@ static int bmi160_acc_read_sensor_data(struct i2c_client *client, char *buf,
 		acc[BMI160_ACC_AXIS_Z] =
 		    acc[BMI160_ACC_AXIS_Z] * GRAVITY_EARTH_1000 /
 		    obj->reso->sensitivity;
-		GSE_ERR("acc final xyz data: %d,%d,%d, sens:%d\n", acc[0],
+		GSE_LOG("acc final xyz data: %d,%d,%d, sens:%d\n", acc[0],
 			acc[1], acc[2], obj->reso->sensitivity);
 		snprintf(buf, 96, "%04x %04x %04x", acc[BMI160_ACC_AXIS_X],
 			 acc[BMI160_ACC_AXIS_Y], acc[BMI160_ACC_AXIS_Z]);
