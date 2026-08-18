@@ -73,6 +73,8 @@
 
 #define AID_PACKAGE_INFO  1027
 
+#define AID_EXTERNAL_STORAGE 9997	/* trusted external storage */
+
 
 /*
  * Permissions are handled by our permission function.
@@ -432,13 +434,14 @@ static inline int get_gid(struct vfsmount *mnt,
 	struct sdcardfs_sb_info *sbi = SDCARDFS_SB(sb);
 
 	if (vfsopts->gid == AID_SDCARD_RW && !sbi->options.default_normal)
-		/* As an optimization, certain trusted system components only run
-		 * as owner but operate across all users. Since we're now handing
-		 * out the sdcard_rw GID only to trusted apps, we're okay relaxing
-		 * the user boundary enforcement for the default view. The UIDs
-		 * assigned to app directories are still multiuser aware.
+		/* As an optimization, allow apps holding the trusted
+		 * AID_EXTERNAL_STORAGE (9997) gid - which is what the
+		 * Android 8.x framework actually grants to apps with the
+		 * storage runtime permission - to access the default view.
+		 * AOSP instead relied on the app holding sdcard_rw (1015)
+		 * here, but on LineageOS/MTK builds apps only carry 9997.
 		 */
-		return AID_SDCARD_RW;
+		return AID_EXTERNAL_STORAGE;
 	else
 		return multiuser_get_uid(data->userid, vfsopts->gid);
 }
