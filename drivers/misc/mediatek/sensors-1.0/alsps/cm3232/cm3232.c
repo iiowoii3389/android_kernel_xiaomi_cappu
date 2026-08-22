@@ -11,11 +11,13 @@
  * GNU General Public License for more details.
  *
  */
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
 #include <linux/interrupt.h>
 #include <linux/i2c.h>
 #include <linux/slab.h>
 #include <linux/irq.h>
-#include <linux/gpio.h>
 #include <linux/miscdevice.h>
 #include <asm/uaccess.h>
 #include <linux/delay.h>
@@ -24,25 +26,28 @@
 #include <linux/kobject.h>
 #include <linux/platform_device.h>
 #include <asm/atomic.h>
+#include <linux/version.h>
+#include <linux/fs.h>
+#include <linux/wakelock.h>
 #include <asm/io.h>
-#include "cm3232.h"
+#include <linux/module.h>
 #include <linux/sched.h>
-#include <alsps.h>
-#include <linux/of.h>
-#include <linux/of_address.h>
-#include <linux/of_irq.h>
+#include "cust_alsps.h"
+#include "alsps.h"
+#include "cm3232.h"
+
 /******************************************************************************
  * configuration
-*******************************************************************************/
+ *******************************************************************************/
 /*----------------------------------------------------------------------------*/
 
 #define CM3232_DEV_NAME     "cm3232"
 /*----------------------------------------------------------------------------*/
 #define APS_TAG                  "[ALS/PS] "
-#define APS_FUN(f)               pr_info(APS_TAG"%s\n", __func__)
+#define APS_FUN(f)               pr_err(APS_TAG"%s\n", __func__)
 #define APS_ERR(fmt, args...)    pr_err(APS_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
-#define APS_LOG(fmt, args...)    pr_info(APS_TAG fmt, ##args)
-#define APS_DBG(fmt, args...)    pr_debug(APS_TAG fmt, ##args)
+#define APS_LOG(fmt, args...)    pr_err(APS_TAG fmt, ##args)
+#define APS_DBG(fmt, args...)    pr_err(APS_TAG fmt, ##args)
 
 #define I2C_FLAG_WRITE 0
 #define I2C_FLAG_READ 1
@@ -51,34 +56,23 @@
 
 /******************************************************************************
  * extern functions
-*******************************************************************************/
+ *******************************************************************************/
 static int cm3232_i2c_probe(struct i2c_client *client,
 			    const struct i2c_device_id *id);
 static int cm3232_i2c_remove(struct i2c_client *client);
 static int cm3232_i2c_detect(struct i2c_client *client,
 			     struct i2c_board_info *info);
-static int cm3232_i2c_suspend(struct i2c_client *client, pm_message_t msg);
-static int cm3232_i2c_resume(struct i2c_client *client);
+static int cm3232_i2c_suspend(struct device *dev);
+static int cm3232_i2c_resume(struct device *dev);
 
 /*----------------------------------------------------------------------------*/
 static const struct i2c_device_id cm3232_i2c_id[] = {
 	{CM3232_DEV_NAME, 0}, {}
 };
 
-/* Maintain alsps cust info here */
-struct alsps_hw alsps_cust;
-static struct alsps_hw *hw = &alsps_cust;
-struct platform_device *alspsPltFmDev;
-
-/* For alsp driver get cust info */
-struct alsps_hw *get_cust_alsps(void)
-{
-	return &alsps_cust;
-}
-
 /*----------------------------------------------------------------------------*/
 struct cm3232_priv {
-	struct alsps_hw *hw;
+	struct alsps_hw hw;
 	struct i2c_client *client;
 	struct work_struct eint_work;
 
@@ -110,7 +104,6 @@ struct cm3232_priv {
 	/*data */
 	u16 als;
 	u16 ps;
-	/* u8  _align; */
 	u16 als_level_num;
 	u16 als_value_num;
 	u32 als_level[C_CUST_ALS_LEVEL - 1];
@@ -137,26 +130,26 @@ static const struct of_device_id alsps_of_match[] = {
 };
 #endif
 
+#ifdef CONFIG_PM_SLEEP
+static const struct dev_pm_ops cm3232_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(cm3232_i2c_suspend, cm3232_i2c_resume)
+};
+#endif
+
 static struct i2c_driver cm3232_i2c_driver = {
 	.probe = cm3232_i2c_probe,
 	.remove = cm3232_i2c_remove,
 	.detect = cm3232_i2c_detect,
-	.suspend = cm3232_i2c_suspend,
-	.resume = cm3232_i2c_resume,
 	.id_table = cm3232_i2c_id,
 	.driver = {
 		   .name = CM3232_DEV_NAME,
+#ifdef CONFIG_PM_SLEEP
+		   .pm = &cm3232_pm_ops,
+#endif
 #ifdef CONFIG_OF
 		   .of_match_table = alsps_of_match,
 #endif
 		   },
-};
-
-/*----------------------------------------------------------------------------*/
-struct PS_CALI_DATA_STRUCT {
-	int close;
-	int far_away;
-	int valid;
 };
 
 /*----------------------------------------------------------------------------*/
@@ -166,12 +159,12 @@ static struct i2c_client *cm3232_i2c_client;
 static struct cm3232_priv *cm3232_obj;
 
 static int cm3232_local_init(void);
-static int cm3232_remove(void);
+static int cm3232_local_uninit(void);
 static int cm3232_init_flag = -1;	/* 0<==>OK -1 <==> fail */
 static struct alsps_init_info cm3232_init_info = {
 	.name = "cm3232",
 	.init = cm3232_local_init,
-	.uninit = cm3232_remove,
+	.uninit = cm3232_local_uninit,
 };
 
 /*----------------------------------------------------------------------------*/
@@ -270,6 +263,7 @@ int cm3232_enable_als(struct i2c_client *client, int enable)
 			APS_ERR("i2c_master_send function err\n");
 			goto ENABLE_ALS_EXIT_ERR;
 		}
+
 		atomic_set(&obj->als_deb_on, 1);
 #ifdef CONFIG_64BIT
 		atomic64_set(&obj->als_deb_end,
@@ -304,7 +298,6 @@ long cm3232_read_als(struct i2c_client *client, u16 *data)
 {
 	long res;
 	u8 databuf[2];
-	struct cm3232_priv *obj = i2c_get_clientdata(client);
 
 	databuf[0] = CM3232_REG_ALS_DATA;
 	res = CM3232_i2c_master_operate(client, databuf, 0x2, I2C_FLAG_READ);
@@ -312,10 +305,6 @@ long cm3232_read_als(struct i2c_client *client, u16 *data)
 		APS_ERR("i2c_master_send function err\n");
 		goto READ_ALS_EXIT_ERR;
 	}
-
-	if (atomic_read(&obj->trace) & CMC_TRC_DEBUG)
-		APS_LOG("CM3232_REG_ALS_DATA value: %d\n",
-			((databuf[1] << 8) | databuf[0]));
 
 	*data = ((databuf[1] << 8) | databuf[0]);
 
@@ -336,7 +325,382 @@ static int cm3232_get_als_value(struct cm3232_priv *obj, u16 als)
 	return value;
 }
 
-/*--------------------------------------------------------------------------------*/
+/*-------------------------------attribute file for debugging----------------------------------*/
+
+/******************************************************************************
+ * Sysfs attributes
+ *******************************************************************************/
+static ssize_t cm3232_show_config(struct device_driver *ddri, char *buf)
+{
+	ssize_t res;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	}
+
+	res = snprintf(buf, PAGE_SIZE, "(%d %d %d %d %d)\n",
+		       atomic_read(&cm3232_obj->i2c_retry),
+		       atomic_read(&cm3232_obj->als_debounce),
+		       atomic_read(&cm3232_obj->ps_mask),
+		       atomic_read(&cm3232_obj->ps_thd_val),
+		       atomic_read(&cm3232_obj->ps_debounce));
+	return res;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_store_config(struct device_driver *ddri, const char *buf,
+				   size_t count)
+{
+	int retry, als_deb, ps_deb, mask, thres;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	}
+
+	if (5 ==
+	    sscanf(buf, "%d %d %d %d %d", &retry, &als_deb, &mask, &thres,
+		   &ps_deb)) {
+		atomic_set(&cm3232_obj->i2c_retry, retry);
+		atomic_set(&cm3232_obj->als_debounce, als_deb);
+		atomic_set(&cm3232_obj->ps_mask, mask);
+		atomic_set(&cm3232_obj->ps_thd_val, thres);
+		atomic_set(&cm3232_obj->ps_debounce, ps_deb);
+	} else {
+		APS_ERR("invalid content: '%s', length = %zu\n", buf, count);
+	}
+	return count;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_show_trace(struct device_driver *ddri, char *buf)
+{
+	ssize_t res;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	}
+
+	res =
+	    snprintf(buf, PAGE_SIZE, "0x%04X\n",
+		     atomic_read(&cm3232_obj->trace));
+	return res;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_store_trace(struct device_driver *ddri, const char *buf,
+				  size_t count)
+{
+	int trace;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	}
+
+	if (1 == sscanf(buf, "0x%x", &trace))
+		atomic_set(&cm3232_obj->trace, trace);
+	else
+		APS_ERR("invalid content: '%s', length = %zu\n", buf, count);
+
+	return count;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_show_als(struct device_driver *ddri, char *buf)
+{
+	int res;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	}
+	res = cm3232_read_als(cm3232_obj->client, &cm3232_obj->als);
+	if (res)
+		return snprintf(buf, PAGE_SIZE, "ERROR: %d\n", res);
+	else
+		return snprintf(buf, PAGE_SIZE, "0x%04X\n", cm3232_obj->als);
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_show_reg(struct device_driver *ddri, char *buf)
+{
+	u8 _bIndex = 0;
+	u8 databuf[2] = { 0 };
+	ssize_t _tLength = 0;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3623_obj is null!!\n");
+		return 0;
+	}
+
+	for (_bIndex = 0; _bIndex < 0x0D; _bIndex++) {
+		databuf[0] = _bIndex;
+		CM3232_i2c_master_operate(cm3232_obj->client, databuf, 0x2,
+					  I2C_FLAG_READ);
+		_tLength +=
+		    snprintf((buf + _tLength), (PAGE_SIZE - _tLength),
+			     "Reg[0x%02X]: 0x%02X\n", _bIndex, databuf[0]);
+	}
+
+	return _tLength;
+
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_show_send(struct device_driver *ddri, char *buf)
+{
+	return 0;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_store_send(struct device_driver *ddri, const char *buf,
+				 size_t count)
+{
+	int addr, cmd;
+	u8 dat;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	} else if (2 != sscanf(buf, "%x %x", &addr, &cmd)) {
+		APS_ERR("invalid format: '%s'\n", buf);
+		return 0;
+	}
+
+	dat = (u8) cmd;
+
+	return count;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_show_recv(struct device_driver *ddri, char *buf)
+{
+	return 0;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_store_recv(struct device_driver *ddri, const char *buf,
+				 size_t count)
+{
+	int addr;
+	int ret;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	}
+	ret = kstrtoint(buf, 16, &addr);
+	if (ret < 0) {
+		APS_ERR("invalid format: '%s'\n", buf);
+		return 0;
+	}
+
+	return count;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_show_status(struct device_driver *ddri, char *buf)
+{
+	ssize_t len = 0;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	}
+
+	if (cm3232_obj) {
+		len +=
+		    snprintf(buf + len, PAGE_SIZE - len, "CUST: %d, (%d %d)\n",
+			     cm3232_obj->hw.i2c_num, cm3232_obj->hw.power_id,
+			     cm3232_obj->hw.power_vol);
+	} else {
+		len += snprintf(buf + len, PAGE_SIZE - len, "CUST: NULL\n");
+	}
+
+	len +=
+	    snprintf(buf + len, PAGE_SIZE - len,
+		     "REGS: %02X %02X %02X %02lX %02lX\n",
+		     atomic_read(&cm3232_obj->als_cmd_val),
+		     atomic_read(&cm3232_obj->ps_cmd_val),
+		     atomic_read(&cm3232_obj->ps_thd_val), cm3232_obj->enable,
+		     cm3232_obj->pending_intr);
+
+	len +=
+	    snprintf(buf + len, PAGE_SIZE - len, "MISC: %d %d\n",
+		     atomic_read(&cm3232_obj->als_suspend),
+		     atomic_read(&cm3232_obj->ps_suspend));
+
+	return len;
+}
+
+/*----------------------------------------------------------------------------*/
+#define IS_SPACE(CH) (((CH) == ' ') || ((CH) == '\n'))
+/*----------------------------------------------------------------------------*/
+static int read_int_from_buf(struct cm3232_priv *obj, const char *buf,
+			     size_t count, u32 data[], int len)
+{
+	int idx = 0;
+	int ret;
+	char *cur = (char *)buf, *end = (char *)(buf + count);
+
+	while (idx < len) {
+		while ((cur < end) && IS_SPACE(*cur))
+			cur++;
+
+		ret = kstrtoint(cur, 10, &data[idx]);
+		if (ret < 0)
+			break;
+
+		idx++;
+		while ((cur < end) && !IS_SPACE(*cur))
+			cur++;
+	}
+	return idx;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_show_alslv(struct device_driver *ddri, char *buf)
+{
+	ssize_t len = 0;
+	int idx;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	}
+
+	for (idx = 0; idx < cm3232_obj->als_level_num; idx++)
+		len +=
+		    snprintf(buf + len, PAGE_SIZE - len, "%d ",
+			     cm3232_obj->hw.als_level[idx]);
+	len += snprintf(buf + len, PAGE_SIZE - len, "\n");
+	return len;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_store_alslv(struct device_driver *ddri, const char *buf,
+				  size_t count)
+{
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	} else if (!strcmp(buf, "def")) {
+		memcpy(cm3232_obj->als_level, cm3232_obj->hw.als_level,
+		       sizeof(cm3232_obj->als_level));
+	} else if (cm3232_obj->als_level_num !=
+		   read_int_from_buf(cm3232_obj, buf, count,
+				     cm3232_obj->hw.als_level,
+				     cm3232_obj->als_level_num)) {
+		APS_ERR("invalid format: '%s'\n", buf);
+	}
+	return count;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_show_alsval(struct device_driver *ddri, char *buf)
+{
+	ssize_t len = 0;
+	int idx;
+
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	}
+
+	for (idx = 0; idx < cm3232_obj->als_value_num; idx++)
+		len +=
+		    snprintf(buf + len, PAGE_SIZE - len, "%d ",
+			     cm3232_obj->hw.als_value[idx]);
+	len += snprintf(buf + len, PAGE_SIZE - len, "\n");
+	return len;
+}
+
+/*----------------------------------------------------------------------------*/
+static ssize_t cm3232_store_alsval(struct device_driver *ddri, const char *buf,
+				   size_t count)
+{
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return 0;
+	} else if (!strcmp(buf, "def")) {
+		memcpy(cm3232_obj->als_value, cm3232_obj->hw.als_value,
+		       sizeof(cm3232_obj->als_value));
+	} else if (cm3232_obj->als_value_num !=
+		   read_int_from_buf(cm3232_obj, buf, count,
+				     cm3232_obj->hw.als_value,
+				     cm3232_obj->als_value_num)) {
+		APS_ERR("invalid format: '%s'\n", buf);
+	}
+	return count;
+}
+
+/*---------------------------------------------------------------------------------------*/
+static DRIVER_ATTR(als, S_IWUSR | S_IRUGO, cm3232_show_als, NULL);
+static DRIVER_ATTR(config, S_IWUSR | S_IRUGO, cm3232_show_config,
+		   cm3232_store_config);
+static DRIVER_ATTR(alslv, S_IWUSR | S_IRUGO, cm3232_show_alslv,
+		   cm3232_store_alslv);
+static DRIVER_ATTR(alsval, S_IWUSR | S_IRUGO, cm3232_show_alsval,
+		   cm3232_store_alsval);
+static DRIVER_ATTR(trace, S_IWUSR | S_IRUGO, cm3232_show_trace,
+		   cm3232_store_trace);
+static DRIVER_ATTR(status, S_IWUSR | S_IRUGO, cm3232_show_status, NULL);
+static DRIVER_ATTR(send, S_IWUSR | S_IRUGO, cm3232_show_send,
+		   cm3232_store_send);
+static DRIVER_ATTR(recv, S_IWUSR | S_IRUGO, cm3232_show_recv,
+		   cm3232_store_recv);
+static DRIVER_ATTR(reg, S_IWUSR | S_IRUGO, cm3232_show_reg, NULL);
+/*----------------------------------------------------------------------------*/
+static struct driver_attribute *cm3232_attr_list[] = {
+	&driver_attr_als,
+	&driver_attr_trace,	/*trace log */
+	&driver_attr_config,
+	&driver_attr_alslv,
+	&driver_attr_alsval,
+	&driver_attr_status,
+	&driver_attr_send,
+	&driver_attr_recv,
+	&driver_attr_reg,
+};
+
+/*----------------------------------------------------------------------------*/
+static int cm3232_create_attr(struct device_driver *driver)
+{
+	int idx, err = 0;
+	int num = (int)(sizeof(cm3232_attr_list) / sizeof(cm3232_attr_list[0]));
+
+	if (driver == NULL)
+		return -EINVAL;
+
+	for (idx = 0; idx < num; idx++) {
+		err = driver_create_file(driver, cm3232_attr_list[idx]);
+		if (err) {
+			APS_ERR("driver_create_file (%s) = %d\n",
+				cm3232_attr_list[idx]->attr.name, err);
+			break;
+		}
+	}
+	return err;
+}
+
+/*----------------------------------------------------------------------------*/
+static int cm3232_delete_attr(struct device_driver *driver)
+{
+	int idx, err = 0;
+	int num = (int)(sizeof(cm3232_attr_list) / sizeof(cm3232_attr_list[0]));
+
+	if (!driver)
+		return -EINVAL;
+
+	for (idx = 0; idx < num; idx++)
+		driver_remove_file(driver, cm3232_attr_list[idx]);
+
+	return err;
+}
+
 static int cm3232_init_client(struct i2c_client *client)
 {
 	u8 databuf[2];
@@ -383,17 +747,17 @@ static int als_enable_nodata(int en)
 
 	APS_LOG("cm3232_obj als enable value = %d\n", en);
 
+	if (!cm3232_obj) {
+		APS_ERR("cm3232_obj is null!!\n");
+		return -EINVAL;
+	}
+
 	mutex_lock(&cm3232_mutex);
 	if (en)
 		set_bit(CMC_BIT_ALS, &cm3232_obj->enable);
 	else
 		clear_bit(CMC_BIT_ALS, &cm3232_obj->enable);
 	mutex_unlock(&cm3232_mutex);
-
-	if (!cm3232_obj) {
-		APS_ERR("cm3232_obj is null!!\n");
-		return -EINVAL;
-	}
 
 	res = cm3232_enable_als(cm3232_obj->client, en);
 	if (res) {
@@ -407,6 +771,16 @@ static int als_enable_nodata(int en)
 static int als_set_delay(u64 ns)
 {
 	return 0;
+}
+
+static int als_batch(int flag, int64_t samplingPeriodNs, int64_t maxBatchReportLatencyNs)
+{
+	return als_set_delay(samplingPeriodNs);
+}
+
+static int als_flush(void)
+{
+	return als_flush_report();
 }
 
 static int als_get_data(int *value, int *status)
@@ -452,51 +826,194 @@ static int ps_set_delay(u64 ns)
 	return 0;
 }
 
+static int ps_batch(int flag, int64_t samplingPeriodNs, int64_t maxBatchReportLatencyNs)
+{
+	return 0;
+}
+
+static int ps_flush(void)
+{
+	return ps_flush_report();
+}
+
 static int ps_get_data(int *value, int *status)
 {
 	/* no suppport */
 	return 0;
 }
 
-static int als_batch(int flag, int64_t samplingPeriodNs, int64_t maxBatchReportLatencyNs)
+/*-----------------------------------factory operations----------------------------------*/
+static int cm3232_als_factory_enable_sensor(bool enable_disable, int64_t sample_periods_ms)
 {
-	int value = 0;
+	int err = 0;
+	APS_FUN();
 
-	value = (int)samplingPeriodNs / 1000 / 1000;
-	APS_LOG("cm3232 als set delay = (%d) ok.\n", value);
+	err = als_enable_nodata(enable_disable ? 1 : 0);
+	if (err) {
+		APS_ERR("%s:%s failed\n", __func__, enable_disable ? "enable" : "disable");
+		return -1;
+	}
+	err = als_batch(0, sample_periods_ms * 1000000, 0);
+	if (err) {
+		APS_ERR("%s set_batch failed\n", __func__);
+		return -1;
+	}
 	return 0;
 }
 
-static int als_flush(void)
+static int cm3232_als_factory_get_data(int32_t *data)
 {
-	int err = 0;
+	int status;
 
-	if (!test_bit(CMC_BIT_ALS, &cm3232_obj->enable)) {
-		return 0;
-	}
-	err = als_flush_report();
-	return err;
+	APS_FUN();
+	return als_get_data(data, &status);
 }
 
-static int ps_batch(int flag, int64_t samplingPeriodNs, int64_t maxBatchReportLatencyNs)
+static int cm3232_als_factory_get_raw_data(int32_t *data)
 {
-	int value = 0;
+	int err = 0;
+	struct cm3232_priv *obj = cm3232_obj;
 
-	value = (int)samplingPeriodNs / 1000 / 1000;
-	APS_LOG("cm3232 ps set delay = (%d) ok.\n", value);
+	APS_FUN();
+
+	if (!obj) {
+		APS_ERR("obj is null!!\n");
+		return -1;
+	}
+
+	err = cm3232_read_als(obj->client, &obj->als);
+	if (err) {
+		APS_ERR("%s failed\n", __func__);
+		return -1;
+	}
+	*data = obj->als;
+
 	return 0;
 }
 
-static int ps_flush(void)
+static int cm3232_als_factory_enable_calibration(void)
 {
-	int err = 0;
-
-	if (!test_bit(CMC_BIT_PS, &cm3232_obj->enable)) {
-		return 0;
-	}
-	err = ps_flush_report();
-	return err;
+	APS_FUN();
+	return 0;
 }
+
+static int cm3232_als_factory_clear_cali(void)
+{
+	APS_FUN();
+	return 0;
+}
+
+static int cm3232_als_factory_set_cali(int32_t offset)
+{
+	struct cm3232_priv *obj = cm3232_obj;
+
+	APS_FUN();
+	if (obj)
+		obj->als_cali = offset;
+	return 0;
+}
+
+static int cm3232_als_factory_get_cali(int32_t *offset)
+{
+	struct cm3232_priv *obj = cm3232_obj;
+
+	APS_FUN();
+	if (obj)
+		*offset = obj->als_cali;
+	return 0;
+}
+
+static int cm3232_ps_factory_enable_sensor(bool enable_disable, int64_t sample_periods_ms)
+{
+	APS_FUN();
+	return 0;
+}
+
+static int cm3232_ps_factory_get_data(int32_t *data)
+{
+	APS_FUN();
+	return 0;
+}
+
+static int cm3232_ps_factory_get_raw_data(int32_t *data)
+{
+	APS_FUN();
+	return 0;
+}
+
+static int cm3232_ps_factory_enable_calibration(void)
+{
+	APS_FUN();
+	return 0;
+}
+
+static int cm3232_ps_factory_clear_cali(void)
+{
+	struct cm3232_priv *obj = cm3232_obj;
+
+	APS_FUN();
+	if (obj)
+		obj->ps_cali = 0;
+	return 0;
+}
+
+static int cm3232_ps_factory_set_cali(int32_t offset)
+{
+	struct cm3232_priv *obj = cm3232_obj;
+
+	APS_FUN();
+	if (obj)
+		obj->ps_cali = offset;
+	return 0;
+}
+
+static int cm3232_ps_factory_get_cali(int32_t *offset)
+{
+	struct cm3232_priv *obj = cm3232_obj;
+
+	APS_FUN();
+	if (obj)
+		*offset = obj->ps_cali;
+	return 0;
+}
+
+static int cm3232_ps_factory_set_threashold(int32_t threshold[2])
+{
+	APS_FUN();
+	return 0;
+}
+
+static int cm3232_ps_factory_get_threashold(int32_t threshold[2])
+{
+	APS_FUN();
+	return 0;
+}
+
+static struct alsps_factory_fops cm3232_factory_fops = {
+	.als_enable_sensor = cm3232_als_factory_enable_sensor,
+	.als_get_data = cm3232_als_factory_get_data,
+	.als_get_raw_data = cm3232_als_factory_get_raw_data,
+	.als_enable_calibration = cm3232_als_factory_enable_calibration,
+	.als_clear_cali = cm3232_als_factory_clear_cali,
+	.als_set_cali = cm3232_als_factory_set_cali,
+	.als_get_cali = cm3232_als_factory_get_cali,
+
+	.ps_enable_sensor = cm3232_ps_factory_enable_sensor,
+	.ps_get_data = cm3232_ps_factory_get_data,
+	.ps_get_raw_data = cm3232_ps_factory_get_raw_data,
+	.ps_enable_calibration = cm3232_ps_factory_enable_calibration,
+	.ps_clear_cali = cm3232_ps_factory_clear_cali,
+	.ps_set_cali = cm3232_ps_factory_set_cali,
+	.ps_get_cali = cm3232_ps_factory_get_cali,
+	.ps_set_threashold = cm3232_ps_factory_set_threashold,
+	.ps_get_threashold = cm3232_ps_factory_get_threashold,
+};
+
+static struct alsps_factory_public cm3232_factory_device = {
+	.gain = 1,
+	.sensitivity = 1,
+	.fops = &cm3232_factory_fops,
+};
 
 /*-----------------------------------i2c operations----------------------------------*/
 static int cm3232_i2c_probe(struct i2c_client *client,
@@ -509,6 +1026,7 @@ static int cm3232_i2c_probe(struct i2c_client *client,
 	struct als_data_path als_data = { 0 };
 	struct ps_control_path ps_ctl = { 0 };
 	struct ps_data_path ps_data = { 0 };
+	struct device_node *node = NULL;
 
 	APS_FUN();
 
@@ -521,9 +1039,24 @@ static int cm3232_i2c_probe(struct i2c_client *client,
 	memset(obj, 0, sizeof(*obj));
 	cm3232_obj = obj;
 
-	obj->hw = hw;
 	obj->client = client;
 	i2c_set_clientdata(client, obj);
+
+	node = of_find_compatible_node(NULL, NULL, "mediatek,cm3232");
+	if (!node) {
+		APS_ERR("find dts node mediatek,cm3232 fail\n");
+		err = -EINVAL;
+		goto exit_init_failed;
+	}
+
+	err = get_alsps_dts_func(node, &obj->hw);
+	if (err < 0) {
+		APS_ERR("get customization info from dts failed\n");
+		goto exit_init_failed;
+	}
+	APS_LOG("%s: mode als=%d\n", __func__, obj->hw.polling_mode_als);
+	APS_LOG("%s: thdh=%d, thdl=%d\n", __func__,
+		obj->hw.ps_threshold_high, obj->hw.ps_threshold_low);
 
 	/*-----------------------------value need to be confirmed-----------------------------------------*/
 	atomic_set(&obj->als_debounce, 200);
@@ -544,10 +1077,10 @@ static int cm3232_i2c_probe(struct i2c_client *client,
 	atomic_set(&obj->als_suspend, 0);
 	atomic_set(&obj->als_cmd_val, 0xDF);
 	atomic_set(&obj->ps_cmd_val, 0xC1);
-	atomic_set(&obj->ps_thd_val_high, obj->hw->ps_threshold_high);
-	atomic_set(&obj->ps_thd_val_low, obj->hw->ps_threshold_low);
-	atomic_set(&obj->als_thd_val_high, obj->hw->als_threshold_high);
-	atomic_set(&obj->als_thd_val_low, obj->hw->als_threshold_low);
+	atomic_set(&obj->ps_thd_val_high, obj->hw.ps_threshold_high);
+	atomic_set(&obj->ps_thd_val_low, obj->hw.ps_threshold_low);
+	atomic_set(&obj->als_thd_val_high, obj->hw.als_threshold_high);
+	atomic_set(&obj->als_thd_val_low, obj->hw.als_threshold_low);
 	atomic_set(&obj->init_done, 0);
 	obj->irq_node =
 	    of_find_compatible_node(NULL, NULL, "mediatek, ALS-eint");
@@ -557,15 +1090,15 @@ static int cm3232_i2c_probe(struct i2c_client *client,
 	obj->ps_cali = 100;
 	obj->als_cali = 100;
 	obj->als_level_num =
-	    sizeof(obj->hw->als_level) / sizeof(obj->hw->als_level[0]);
+	    sizeof(obj->hw.als_level) / sizeof(obj->hw.als_level[0]);
 	obj->als_value_num =
-	    sizeof(obj->hw->als_value) / sizeof(obj->hw->als_value[0]);
+	    sizeof(obj->hw.als_value) / sizeof(obj->hw.als_value[0]);
 	/*-----------------------------value need to be confirmed-----------------------------------------*/
 
-	BUG_ON(sizeof(obj->als_level) != sizeof(obj->hw->als_level));
-	memcpy(obj->als_level, obj->hw->als_level, sizeof(obj->als_level));
-	BUG_ON(sizeof(obj->als_value) != sizeof(obj->hw->als_value));
-	memcpy(obj->als_value, obj->hw->als_value, sizeof(obj->als_value));
+	BUG_ON(sizeof(obj->als_level) != sizeof(obj->hw.als_level));
+	memcpy(obj->als_level, obj->hw.als_level, sizeof(obj->als_level));
+	BUG_ON(sizeof(obj->als_value) != sizeof(obj->hw.als_value));
+	memcpy(obj->als_value, obj->hw.als_value, sizeof(obj->als_value));
 	atomic_set(&obj->i2c_retry, 3);
 	clear_bit(CMC_BIT_ALS, &obj->enable);
 	clear_bit(CMC_BIT_PS, &obj->enable);
@@ -577,9 +1110,23 @@ static int cm3232_i2c_probe(struct i2c_client *client,
 		goto exit_init_failed;
 	APS_LOG("cm3232_init_client() OK!\n");
 
+	err = alsps_factory_device_register(&cm3232_factory_device);
+	if (err) {
+		APS_ERR("cm3232_factory_device register failed\n");
+		goto exit_misc_device_register_failed;
+	}
 	als_ctl.is_use_common_factory = false;
 	ps_ctl.is_use_common_factory = false;
+	APS_LOG("alsps_factory_device_register OK!\n");
 
+	/*------------------------cm3232 attribute file for debug--------------------------------------*/
+	err =
+	    cm3232_create_attr(&(cm3232_init_info.platform_diver_addr->driver));
+	if (err) {
+		APS_ERR("create attribute err = %d\n", err);
+		goto exit_create_attr_failed;
+	}
+	/*------------------------cm3232 attribute file for debug--------------------------------------*/
 	als_ctl.open_report_data = als_open_report_data;
 	als_ctl.enable_nodata = als_enable_nodata;
 	als_ctl.set_delay = als_set_delay;
@@ -587,6 +1134,10 @@ static int cm3232_i2c_probe(struct i2c_client *client,
 	als_ctl.flush = als_flush;
 	als_ctl.is_report_input_direct = false;
 	als_ctl.is_support_batch = false;
+	if (1 == obj->hw.polling_mode_als)
+		als_ctl.is_polling_mode = true;
+	else
+		als_ctl.is_polling_mode = false;
 
 	err = als_register_control_path(&als_ctl);
 	if (err) {
@@ -609,7 +1160,7 @@ static int cm3232_i2c_probe(struct i2c_client *client,
 	ps_ctl.flush = ps_flush;
 	ps_ctl.is_report_input_direct = false;
 	ps_ctl.is_support_batch = false;
-	ps_ctl.is_polling_mode = obj->hw->polling_mode_ps;
+	ps_ctl.is_polling_mode = obj->hw.polling_mode_ps;
 
 	err = ps_register_control_path(&ps_ctl);
 	if (err) {
@@ -629,7 +1180,10 @@ static int cm3232_i2c_probe(struct i2c_client *client,
 	APS_LOG("%s: OK\n", __func__);
 	return 0;
 
+exit_create_attr_failed:
 exit_sensor_obj_attach_fail:
+exit_misc_device_register_failed:
+	alsps_factory_device_deregister(&cm3232_factory_device);
 exit_init_failed:
 	kfree(obj);
 exit:
@@ -641,10 +1195,21 @@ exit:
 
 static int cm3232_i2c_remove(struct i2c_client *client)
 {
+	int err;
+	/*------------------------cm3232 attribute file for debug--------------------------------------*/
+	err =
+	    cm3232_delete_attr(&(cm3232_init_info.platform_diver_addr->driver));
+	if (err)
+		APS_ERR("cm3232_delete_attr fail: %d\n", err);
+	/*----------------------------------------------------------------------------------------*/
+
+	alsps_factory_device_deregister(&cm3232_factory_device);
+
 	cm3232_i2c_client = NULL;
 	i2c_unregister_device(client);
 	kfree(i2c_get_clientdata(client));
 	return 0;
+
 }
 
 static int cm3232_i2c_detect(struct i2c_client *client,
@@ -655,8 +1220,9 @@ static int cm3232_i2c_detect(struct i2c_client *client,
 
 }
 
-static int cm3232_i2c_suspend(struct i2c_client *client, pm_message_t msg)
+static int cm3232_i2c_suspend(struct device *dev)
 {
+	struct i2c_client *client = to_i2c_client(dev);
 	struct cm3232_priv *obj = i2c_get_clientdata(client);
 	int err;
 
@@ -674,11 +1240,14 @@ static int cm3232_i2c_suspend(struct i2c_client *client, pm_message_t msg)
 	return 0;
 }
 
-static int cm3232_i2c_resume(struct i2c_client *client)
+static int cm3232_i2c_resume(struct device *dev)
 {
+	struct i2c_client *client = to_i2c_client(dev);
 	struct cm3232_priv *obj = i2c_get_clientdata(client);
 	int err;
+	struct hwm_sensor_data sensor_data;
 
+	memset(&sensor_data, 0, sizeof(sensor_data));
 	APS_FUN();
 	if (!obj) {
 		APS_ERR("null pointer!!\n");
@@ -695,11 +1264,13 @@ static int cm3232_i2c_resume(struct i2c_client *client)
 }
 
 /*----------------------------------------------------------------------------*/
-static int cm3232_remove(void)
+static int cm3232_local_uninit(void)
 {
-	cm3232_power(hw, 0);
+	APS_FUN();
+	cm3232_power(NULL, 0);
 
 	i2c_del_driver(&cm3232_i2c_driver);
+	cm3232_i2c_client = NULL;
 	return 0;
 }
 
@@ -707,7 +1278,9 @@ static int cm3232_remove(void)
 
 static int cm3232_local_init(void)
 {
-	cm3232_power(hw, 1);
+	APS_FUN();
+	cm3232_power(NULL, 1);
+
 	if (i2c_add_driver(&cm3232_i2c_driver)) {
 		APS_ERR("add driver error\n");
 		return -EINVAL;
@@ -722,6 +1295,7 @@ static int cm3232_local_init(void)
 static int __init cm3232_init(void)
 {
 	APS_FUN();
+
 	alsps_driver_add(&cm3232_init_info);
 	return 0;
 }

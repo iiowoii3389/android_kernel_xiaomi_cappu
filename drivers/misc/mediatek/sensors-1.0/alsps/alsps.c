@@ -33,6 +33,7 @@ int als_data_report(int value, int status)
 	/*ALSPS_LOG(" +als_data_report! %d, %d\n", value, status);*/
 	/* force trigger data update after sensor enable. */
 	if (cxt->is_get_valid_als_data_after_enable == false) {
+		event.handle = ID_LIGHT;
 		event.flush_action = DATA_ACTION;
 		event.word[0] = value + 1;
 		err = sensor_input_event(cxt->als_mdev.minor, &event);
@@ -41,6 +42,7 @@ int als_data_report(int value, int status)
 		cxt->is_get_valid_als_data_after_enable = true;
 	}
 	if (value != last_als_report_data) {
+		event.handle = ID_LIGHT;
 		event.flush_action = DATA_ACTION;
 		event.word[0] = value;
 		event.status = status;
@@ -58,6 +60,7 @@ int als_flush_report(void)
 	int err = 0;
 	memset(&event, 0, sizeof(struct sensor_event));
 
+	event.handle = ID_LIGHT;
 	event.flush_action = FLUSH_ACTION;
 	err = sensor_input_event(alsps_context_obj->als_mdev.minor, &event);
 	if (err < 0)
@@ -74,6 +77,7 @@ int ps_data_report(int value, int status)
 	memset(&event, 0, sizeof(struct sensor_event));
 
 	pr_warn("[ALS/PS]ps_data_report! %d, %d\n", value, status);
+	event.handle = ID_PROXIMITY;
 	event.flush_action = DATA_ACTION;
 	event.word[0] = value + 1;
 	event.status = status;
@@ -88,6 +92,7 @@ int ps_flush_report(void)
 	int err = 0;
 	memset(&event, 0, sizeof(struct sensor_event));
 
+	event.handle = ID_PROXIMITY;
 	event.flush_action = FLUSH_ACTION;
 	err = sensor_input_event(alsps_context_obj->ps_mdev.minor, &event);
 	if (err < 0)
@@ -303,6 +308,8 @@ static int als_enable_and_batch(void)
 		ALSPS_LOG("als turn on als_power done\n");
 
 		cxt->als_power = 1;
+		cxt->is_get_valid_als_data_after_enable = false;
+		last_als_report_data = -1;
 		ALSPS_LOG("ALSPS als_power on done\n");
 	}
 	/* rate change */

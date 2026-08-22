@@ -2,3 +2,8 @@
 config MTK_CM3232
 	bool "cm3232 for MediaTek package"
 	default n
+	help
+	It support different type sensor
+	in this platform. If this option
+	is set, it will support ambient
+	light sensor cm3232.
