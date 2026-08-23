@@ -787,20 +787,27 @@ static enum hrtimer_restart bt_wake_peer_timeout(struct hrtimer *timer)
 
 static int mtk_uart_bt_wake_peer_activity(void)
 {
-	int ret;
-
 	hrtimer_try_to_cancel(&bt_lpm_pdata.wake_peer_timer);
-	if (!bt_lpm_pdata.bt_dev_wake_enabled) {
-		ret =  gpio_direction_output(bt_lpm_pdata.bt_dev_wake_gpio, 1);
-		if (ret < 0) {
-			printk(KERN_ERR "%s: Unable to set direction for dev wake gpio %d\n", __func__,
-					bt_lpm_pdata.bt_dev_wake_gpio);
-			gpio_free(bt_lpm_pdata.bt_dev_wake_gpio);
-			return ret;
-		}
 
-		bt_lpm_pdata.bt_dev_wake_enabled = 1;
-	}
+	/* The BCM4356 combo controller enters UART idle sleep very quickly after
+	 * the host stops transmitting (on the order of tens of ms), and it only
+	 * re-wakes on a low->high transition of BT_DEV_WAKE.  The original code
+	 * only asserted BT_DEV_WAKE once and left it high, so once the controller
+	 * had dozed off during an inter-command gap (e.g. the post-HCI_RESET or
+	 * post-firmware settle delay) there was no wake edge to bring it back:
+	 * the next HCI command was clocked out while the controller was still
+	 * asleep and was silently dropped, which stalled the whole bring-up until
+	 * the upper stack's multi-second watchdog fired.
+	 *
+	 * Force a fresh low->high wake edge on every TX burst and then hold the
+	 * line high for a short lead time so the controller is fully awake before
+	 * the serial core starts pushing bytes (serial core calls wake_peer()
+	 * immediately before start_tx()). */
+	gpio_set_value(bt_lpm_pdata.bt_dev_wake_gpio, 0);
+	udelay(5);
+	gpio_set_value(bt_lpm_pdata.bt_dev_wake_gpio, 1);
+	bt_lpm_pdata.bt_dev_wake_enabled = 1;
+	udelay(200);
 
 	hrtimer_start(&bt_lpm_pdata.wake_peer_timer, bt_lpm_pdata.wake_peer_delay,
 		HRTIMER_MODE_REL);
@@ -810,9 +817,19 @@ static int mtk_uart_bt_wake_peer_activity(void)
 /*---------------------------------------------------------------------------*/
 static int  mtk_uart_init_bt_lpm(void)
 {
+	static int bt_lpm_inited;
 	int ret;
 	char *bt_node = "bcm,bcm4356-bt";
 	struct device_node *np;
+
+	/* mtk_uart_init_bt_lpm() is called from every mtk_uart_probe(), but the
+	 * BCM BT LPM platform data / host-wake IRQ describe a single controller
+	 * and must be initialised exactly once; the previous code re-requested the
+	 * same IRQ for every UART port and logged "Flags mismatch / Couldn't
+	 * acquire BT_HOST_WAKE IRQ" on all but the first. */
+	if (bt_lpm_inited)
+		return 0;
+	bt_lpm_inited = 1;
 
 	printk(KERN_ERR "%s entry\n", __FUNCTION__);
 
