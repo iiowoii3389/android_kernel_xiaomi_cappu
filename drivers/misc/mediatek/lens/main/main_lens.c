@@ -109,7 +109,17 @@ static stAF_DrvList g_stAF_DrvList[MAX_NUM_OF_LENS] = {
 	{1, AFDRV_AD5820AF, AD5820AF_SetI2Cclient, AD5820AF_Ioctl, AD5820AF_Release},
 #endif
 #ifdef CONFIG_MTK_LENS_WV511AAF_SUPPORT
-	{1, AFDRV_WV511AAF, WV511AAF_SetI2Cclient, WV511AAF_Ioctl, WV511AAF_Release},
+	/* 2026-09-15: userspace's (wrong-sensor, GC8024-tuned) lens table
+	 * requests the actuator by the name "WV511AAF", but this board's
+	 * REAL registered I2C device at 0x0c is named "camera_main_af" /
+	 * driver "MAINAF" -- i.e. genuinely the DW9714 this kernel already
+	 * has correctly configured (CONFIG_MTK_LENS_DW9714AF_SUPPORT was
+	 * already =y before today, the only actuator originally enabled).
+	 * WV511AAF's own I2C protocol talking to 0x0c never worked (writes
+	 * ACK but readback never reflects them) -- keep matching the name
+	 * "WV511AAF" so userspace's lookup still succeeds, but route to the
+	 * real DW9714AF driver functions instead of WV511AAF's. */
+	{1, AFDRV_WV511AAF, DW9714AF_SetI2Cclient, DW9714AF_Ioctl, DW9714AF_Release},
 #endif
 #ifdef CONFIG_MTK_LENS_AK7371AF_SUPPORT
 	{1, AFDRV_AK7371AF, AK7371AF_SetI2Cclient, AK7371AF_Ioctl, AK7371AF_Release},
