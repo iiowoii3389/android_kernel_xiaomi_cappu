@@ -2216,6 +2216,8 @@ static kal_uint32 get_default_framerate_by_scenario(MSDK_SCENARIO_ID_ENUM scenar
 static kal_uint32 set_test_pattern_mode(kal_bool enable)
 {
 	LOG_INF("enable: %d\n", enable);
+	
+	enable = KAL_FALSE;
 
 	if (enable) {
 		write_cmos_sensor(0x6028, 0x2000);
