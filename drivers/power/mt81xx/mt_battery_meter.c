@@ -3123,10 +3123,43 @@ static struct platform_driver battery_meter_driver = {
 	.driver = {
 		   .name = "battery_meter",
 #ifdef CONFIG_OF
-		   .of_match_table = of_match_ptr(mt_battery_meter_id),
+		.of_match_table = of_match_ptr(mt_battery_meter_id),
 #endif
 		   },
 };
+
+#if defined(CONFIG_MTK_KERNEL_POWER_OFF_CHARGING)
+static int update_kpoc_boot_mode(void)
+{
+	struct device_node *np;
+	struct property *prop;
+	static const char prop_name[] = "mode";
+	static const char prop_value[] = "charger";
+
+	if (get_boot_mode() == LOW_POWER_OFF_CHARGING_BOOT ||
+			get_boot_mode() == KERNEL_POWER_OFF_CHARGING_BOOT) {
+
+		np = of_find_node_by_path("/firmware/android");
+
+		if (!np) {
+			pr_err("%s: can't find dts path!\n", __func__);
+			return 0;
+		}
+
+		prop = kzalloc(sizeof(*prop), GFP_KERNEL);
+		if (!prop)
+			return 0;
+
+		prop->name = (char *)prop_name;
+		prop->value = (void *)prop_value;
+		prop->length = strlen(prop->value);
+		of_update_property(np, prop);
+	}
+
+	return 0;
+}
+late_initcall(update_kpoc_boot_mode);
+#endif
 
 static int __init battery_meter_init(void)
 {

@@ -297,6 +297,7 @@ static enum power_supply_property battery_props[] = {
 	/* Add for Battery Service */
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_VOLTAGE_AVG,
+	POWER_SUPPLY_PROP_batt_vol,
 	POWER_SUPPLY_PROP_TEMP,
 	/* Add for EM
 	   POWER_SUPPLY_PROP_TemperatureR,
@@ -478,6 +479,9 @@ static int battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		val->intval = data->BAT_VOLTAGE_NOW;
+		break;
+	case POWER_SUPPLY_PROP_batt_vol:
+		val->intval = data->BAT_VOLTAGE_NOW / 1000;
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
 		val->intval = data->BAT_TEMP;
@@ -3138,6 +3142,14 @@ static int battery_probe(struct platform_device *pdev)
 	wake_lock_init(&battery_suspend_lock, WAKE_LOCK_SUSPEND, "battery suspend wakelock");
 #if defined(CONFIG_MTK_PUMP_EXPRESS_PLUS_SUPPORT)
 	wake_lock_init(&TA_charger_suspend_lock, WAKE_LOCK_SUSPEND, "TA charger suspend wakelock");
+#endif
+
+#if defined(CONFIG_MTK_KERNEL_POWER_OFF_CHARGING)
+	if ((get_boot_mode() == KERNEL_POWER_OFF_CHARGING_BOOT)
+	    || (get_boot_mode() == LOW_POWER_OFF_CHARGING_BOOT)) {
+		if (upmu_is_chr_det() == true)
+			wake_lock(&battery_suspend_lock);
+	}
 #endif
 
 	/* Integrate with Android Battery Service */

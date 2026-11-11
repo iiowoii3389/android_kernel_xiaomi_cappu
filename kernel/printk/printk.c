@@ -147,7 +147,8 @@ bool mt_get_uartlog_status(void)
 void set_uartlog_status(bool value)
 {
 #ifdef CONFIG_MT_ENG_BUILD
-	printk_disable_uart = !value;
+	/* UART console is force-enabled, ignore disable requests */
+	printk_disable_uart = 0;
 	pr_info("set uart log status %d.\n", value);
 #endif
 }
@@ -377,8 +378,7 @@ static u32 log_buf_len = __LOG_BUF_LEN;
 #ifdef CONFIG_MT_PRINTK_UART_CONSOLE
 void mt_disable_uart(void)
 {
-	if (mt_need_uart_console == 0)
-		printk_disable_uart = 1;
+	/* UART console is force-enabled, bootprof cannot mute it */
 }
 void mt_enable_uart(void)
 {
@@ -1186,7 +1186,20 @@ static inline void boot_delay_msec(int level)
 
 static bool printk_time = IS_ENABLED(CONFIG_PRINTK_TIME);
 module_param_named(time, printk_time, bool, S_IRUGO | S_IWUSR);
-module_param_named(disable_uart, printk_disable_uart, bool, S_IRUGO | S_IWUSR);
+/*
+ * UART console is force-enabled: reject "printk.disable_uart=" passed by the
+ * bootloader (LK) instead of letting it mute early boot logs. The /sys node
+ * is kept for compatibility, but writes no longer take effect.
+ */
+static int param_set_disable_uart(const char *val, const struct kernel_param *kp)
+{
+	return 0;
+}
+static const struct kernel_param_ops disable_uart_ops = {
+	.set = param_set_disable_uart,
+	.get = param_get_bool,
+};
+module_param_cb(disable_uart, &disable_uart_ops, &printk_disable_uart, S_IRUGO | S_IWUSR);
 
 static size_t print_time(u64 ts, char *buf)
 {

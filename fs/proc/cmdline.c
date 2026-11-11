@@ -2,27 +2,10 @@
 #include <linux/init.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/string.h>
 #include <asm/setup.h>
 
 static char new_command_line[COMMAND_LINE_SIZE];
-
-static int cmdline_proc_show(struct seq_file *m, void *v)
-{
-	seq_printf(m, "%s\n", new_command_line);
-	return 0;
-}
-
-static int cmdline_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, cmdline_proc_show, NULL);
-}
-
-static const struct file_operations cmdline_proc_fops = {
-	.open		= cmdline_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 
 static void remove_flag(char *cmd, const char *flag)
 {
@@ -46,16 +29,35 @@ static void remove_safetynet_flags(char *cmd)
 	remove_flag(cmd, "androidboot.veritymode=");
 }
 
-static int __init proc_cmdline_init(void)
+static int cmdline_proc_show(struct seq_file *m, void *v)
 {
-	strcpy(new_command_line, saved_command_line);
+	seq_printf(m, "%s\n", new_command_line);
+	return 0;
+}
 
+static int cmdline_proc_open(struct inode *inode, struct file *file)
+{
 	/*
-	 * Remove various flags from command line seen by userspace in order to
-	 * pass SafetyNet CTS check.
+	 * Copy at open-time, not at fs_initcall: with kernel power-off
+	 * charging the battery driver re-allocates saved_command_line
+	 * during device_initcall to append "androidboot.mode=charger",
+	 * which the early snapshot would hide from init.
 	 */
+	strlcpy(new_command_line, saved_command_line, sizeof(new_command_line));
 	remove_safetynet_flags(new_command_line);
 
+	return single_open(file, cmdline_proc_show, NULL);
+}
+
+static const struct file_operations cmdline_proc_fops = {
+	.open		= cmdline_proc_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static int __init proc_cmdline_init(void)
+{
 	proc_create("cmdline", 0, NULL, &cmdline_proc_fops);
 	return 0;
 }

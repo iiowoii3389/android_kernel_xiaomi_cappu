@@ -34,7 +34,9 @@
 /*                     Define Proc entry               */
 /* --------------------------------------------------- */
 MT_DEBUG_ENTRY(printk_ctrl);
-int mt_need_uart_console;
+/* force uart console on from the very beginning, overriding
+ * "printk.disable_uart=1" passed by LK */
+int mt_need_uart_console = 1;
 
 static int mt_printk_ctrl_show(struct seq_file *m, void *v)
 {

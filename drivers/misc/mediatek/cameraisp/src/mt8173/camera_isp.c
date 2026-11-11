@@ -37,6 +37,8 @@
 #include <linux/atomic.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
+#include <linux/vmalloc.h>
+#include <linux/workqueue.h>
 /*#include "inc/mt_typedefs.h"*/
 /* #include	<mach/mt6593_pll.h>	*/
 #include "inc/camera_isp.h"
@@ -3221,6 +3223,11 @@ static void ISP_EnableClock(MBOOL En)
 		spin_unlock(&(IspInfo.SpinLockClock));
 #else
 		/*LOG_INF("CCF:disable_unprepare clk\n"); */
+		if (G_u4EnableClockCount == 0) {
+			LOG_INF("Now: G_u4EnableClockCount = 0, just return!");
+			return;
+		}
+
 		spin_lock(&(IspInfo.SpinLockClock));
 		G_u4EnableClockCount--;
 		spin_unlock(&(IspInfo.SpinLockClock));
@@ -11722,9 +11729,106 @@ static MINT32 ISP_remove(struct platform_device *pDev)
 ********************************************************************************/
 static MINT32 bPass1_On_In_Resume_TG1;
 static MINT32 bPass1_On_In_Resume_TG2;
+/* clock refs + register state to restore after resume (8.1 HAL) */
+static MUINT32 G_u4ClkCntSavedForResume;
+static MBOOL G_bIspRestorePending;
+static void ISP_RestoreWork(struct work_struct *work);
+static DECLARE_DELAYED_WORK(isp_restore_work, ISP_RestoreWork);
+
+#define ISP_REG_BACKUP_ISP_SIZE		0x9000	/* ISP incl. SENINF/MIPIRX-CFG */
+#define ISP_REG_BACKUP_INNER_SIZE	0x1000	/* INNER ISP */
+#define ISP_REG_BACKUP_TOTAL_SIZE	(ISP_REG_BACKUP_ISP_SIZE + \
+					ISP_REG_BACKUP_INNER_SIZE)
+static MUINT32 *G_pIspRegBackup;
+
+static void ISP_RegRangeBackup(unsigned long base, MUINT32 *buf, MUINT32 size)
+{
+	MUINT32 i;
+
+	for (i = 0; i < size / 4; i++)
+		buf[i] = ISP_RD32(base + i * 4);
+}
+
+static void ISP_RegRangeRestore(unsigned long base, MUINT32 *buf, MUINT32 size)
+{
+	MUINT32 i;
+
+	for (i = 0; i < size / 4; i++)
+		ISP_WR32(base + i * 4, buf[i]);
+}
+
+static void ISP_BackupRegisters(void)
+{
+	MUINT32 *buf;
+
+	if (G_pIspRegBackup == NULL) {
+		G_pIspRegBackup = vzalloc(ISP_REG_BACKUP_TOTAL_SIZE);
+		if (G_pIspRegBackup == NULL) {
+			LOG_ERR("alloc ISP register backup buffer fail\n");
+			return;
+		}
+	}
+
+	buf = G_pIspRegBackup;
+	pr_info("[cam_isp] suspend: backup ISP regs (0x9000)\n");
+	ISP_RegRangeBackup(ISP_ADDR, buf, ISP_REG_BACKUP_ISP_SIZE);
+	buf += ISP_REG_BACKUP_ISP_SIZE / 4;
+	pr_info("[cam_isp] suspend: backup INNER regs (0x1000)\n");
+	ISP_RegRangeBackup(gISPSYS_Reg[ISP_INNER_BASE_ADDR], buf,
+			   ISP_REG_BACKUP_INNER_SIZE);
+
+	pr_info("[cam_isp] suspend: ISP register state backed up\n");
+}
+
+static void ISP_RestoreRegisters(void)
+{
+	MUINT32 *buf;
+
+	if (G_pIspRegBackup == NULL)
+		return;
+
+	buf = G_pIspRegBackup;
+	pr_info("[cam_isp] resume: restore ISP regs (0x9000)\n");
+	ISP_RegRangeRestore(ISP_ADDR, buf, ISP_REG_BACKUP_ISP_SIZE);
+	buf += ISP_REG_BACKUP_ISP_SIZE / 4;
+	pr_info("[cam_isp] resume: restore INNER regs (0x1000)\n");
+	ISP_RegRangeRestore(gISPSYS_Reg[ISP_INNER_BASE_ADDR], buf,
+			    ISP_REG_BACKUP_INNER_SIZE);
+
+	pr_info("[cam_isp] resume: ISP register state restored\n");
+}
+
+/*  The SMI/larb power references cannot be taken from the resume callback:
+ *  the PM core keeps runtime PM disabled for the resume callbacks and
+ *  re-enables it only after dpm_complete, so pm_runtime_get_sync() on the
+ *  larb2/smi_common devices fails with -EACCES there (the display driver
+ *  avoids this by taking its larb refs from the late-resume HAL thread).
+ *  Defer the whole restore - clock refs first (which also powers the ISP
+ *  domain back on via the larb pm refs), then the register write-back.  */
+static void ISP_RestoreWork(struct work_struct *work)
+{
+	MUINT32 cnt = G_u4ClkCntSavedForResume;
+	MUINT32 i;
+
+	if (!G_bIspRestorePending)
+		return;
+	G_bIspRestorePending = MFALSE;
+	G_u4ClkCntSavedForResume = 0;
+
+	for (i = 0; i < cnt; ++i)
+		ISP_EnableClock(MTRUE);
+	pr_info("[cam_isp] resume: restore %u clock ref(s)\n", cnt);
+
+	ISP_RestoreRegisters();
+}
+
 static MINT32 ISP_suspend(struct platform_device *pDev, pm_message_t Mesg)
 {
 	MUINT32 regTG1Val, regTG2Val;
+
+	/*  make sure no deferred restore runs while we suspend; if one was
+	 *  still pending, keep its (still valid) backup for the next resume  */
+	cancel_delayed_work_sync(&isp_restore_work);
 
 	if (IspInfo.UserCount == 0) {
 		LOG_DBG("ISP UserCount=0");
@@ -11752,6 +11856,27 @@ static MINT32 ISP_suspend(struct platform_device *pDev, pm_message_t Mesg)
 		ISP_WR32(ISP_ADDR + 0x4B4, (regTG2Val & (~0x01)));
 	}
 
+	/*  save the HAL-persisted register state while the clocks are still
+	 *  running (must happen before the force-off below).  If a restore is
+	 *  still pending from the previous wake, keep the older backup: the
+	 *  HAL expects that config, not the power-cycled registers.  */
+	if (G_bIspRestorePending)
+		pr_info("[cam_isp] suspend: restore still pending, keep previous backup\n");
+	else
+		ISP_BackupRegisters();
+
+#if 1
+	G_u4ClkCntSavedForResume = G_u4EnableClockCount;
+	if (G_u4ClkCntSavedForResume > 0) {
+		int i;
+		/* disable clock for g_EnableClkCnt times */
+		for (i = 0; i < G_u4ClkCntSavedForResume; ++i)
+			ISP_EnableClock(MFALSE);
+		pr_info("[cam_isp] suspend: force-off %u leftover clock ref(s)\n",
+			G_u4ClkCntSavedForResume);
+	}
+#endif
+
 	return 0;
 }
 
@@ -11760,31 +11885,13 @@ static MINT32 ISP_suspend(struct platform_device *pDev, pm_message_t Mesg)
 ********************************************************************************/
 static MINT32 ISP_resume(struct platform_device *pDev)
 {
-	MUINT32 regTG1Val, regTG2Val;
-
 	if (IspInfo.UserCount == 0) {
 		LOG_DBG("ISP UserCount=0");
 		return 0;
 	}
 
-	/* TG_VF_CON[0] (0x15004414[0]): VFDATA_EN.     TG1     Take Picture Request. */
-	regTG1Val = ISP_RD32(ISP_ADDR + 0x414);
-	/* TG2_VF_CON[0] (0x150044B4[0]): VFDATA_EN. TG2 Take Picture Request. */
-	regTG2Val = ISP_RD32(ISP_ADDR + 0x4B4);
-
-	LOG_DBG
-	    ("bPass1_On_In_Resume_TG1(%d). bPass1_On_In_Resume_TG2(%d). regTG1Val(0x%x) regTG2Val(0x%x)\n",
-	     bPass1_On_In_Resume_TG1, bPass1_On_In_Resume_TG2, regTG1Val, regTG2Val);
-
-	if (bPass1_On_In_Resume_TG1) {
-		bPass1_On_In_Resume_TG1 = 0;
-		ISP_WR32(ISP_ADDR + 0x414, (regTG1Val | 0x01));	/* For TG1 Main sensor. */
-	}
-
-	if (bPass1_On_In_Resume_TG2) {
-		bPass1_On_In_Resume_TG2 = 0;
-		ISP_WR32(ISP_ADDR + 0x4B4, (regTG2Val | 0x01));	/* For TG2 Sub sensor. */
-	}
+	G_bIspRestorePending = MTRUE;
+	schedule_delayed_work(&isp_restore_work, msecs_to_jiffies(200));
 
 	return 0;
 }

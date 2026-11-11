@@ -1884,11 +1884,10 @@ static kal_uint32 get_info(MSDK_SCENARIO_ID_ENUM scenario_id,
 	sensor_info->SensorWidthSampling = 0;
 	sensor_info->SensorHightSampling = 0;
 	sensor_info->SensorPacketECCOrder = 1;
-	#ifdef FPTPDAFSUPPORT
-	sensor_info->PDAF_Support = 1;
-	#else
+	/* cappu: 8.1 closed HAL's PD buf mgr is a stub -> DAF gets garbage PD
+	 * data and AF never settles (rear camera permanently out of focus).
+	 * Report no PDAF so 3A falls back to plain contrast AF. */
 	sensor_info->PDAF_Support = 0;
-	#endif
 
 	switch (scenario_id) {
 	case MSDK_SCENARIO_ID_CAMERA_PREVIEW:
@@ -2352,13 +2351,14 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 	/******************** PDAF START >>> *********/
 	case SENSOR_FEATURE_GET_SENSOR_PDAF_CAPACITY:
 		printk("++++++++++SENSOR_FEATURE_GET_SENSOR_PDAF_CAPACITY scenarioId:%llu\n", *feature_data);
-			/* PDAF capacity enable or not, 2p8 only full size support PDAF */
+			/* PDAF capacity enable or not, 2p8 only full size support PDAF
+		 * cappu: report 0 (see PDAF_Support note above) */
 		switch (*feature_data) {
 		case MSDK_SCENARIO_ID_CAMERA_CAPTURE_JPEG:
-			*(MUINT32 *)(uintptr_t)(*(feature_data+1)) = 1;
+			*(MUINT32 *)(uintptr_t)(*(feature_data+1)) = 0;
 			break;
 		case MSDK_SCENARIO_ID_VIDEO_PREVIEW:
-			*(MUINT32 *)(uintptr_t)(*(feature_data+1)) = 1;
+			*(MUINT32 *)(uintptr_t)(*(feature_data+1)) = 0;
 			break;
 		case MSDK_SCENARIO_ID_HIGH_SPEED_VIDEO:
 			*(MUINT32 *)(uintptr_t)(*(feature_data+1)) = 0;
